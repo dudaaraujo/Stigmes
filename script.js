@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-12-r';
+const APP_VERSION = '2026-08-12-t';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -782,22 +782,8 @@ function renderSync() {
     ${accountBlock}
     <div class="card">
       <div class="row-between"><span style="font-size:13px;color:var(--sub)">Status da planilha</span><span style="font-weight:700;color:${st.color}">${st.txt}</span></div>
-      <div class="field-label mt14">Link do app da planilha (Apps Script)</div>
-      <input class="field" id="sync-url" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(url)}">
-      <button class="primary-btn" id="sync-save">Salvar e conectar</button>
-      <button class="primary-btn" id="sync-reload" style="background:var(--teal);margin-top:10px" ${url?'':'disabled'}>Recarregar dados da planilha</button>
-      <button class="primary-btn" id="sync-resend" style="background:var(--gold);margin-top:10px" ${url?'':'disabled'}>Reenviar meu cadastro à planilha</button>
-    </div>
-    <div class="card">
-      <div class="mini-label" style="margin-bottom:10px">Como conectar</div>
-      <ol style="margin:0;padding-left:18px;font-size:13px;line-height:1.7;color:var(--text)">
-        <li>Crie uma planilha no Google Sheets.</li>
-        <li>Menu <b>Extensões → Apps Script</b>.</li>
-        <li>Cole o código do arquivo <b>apps-script.gs</b>.</li>
-        <li><b>Implantar → Nova implantação → App da Web</b>. Acesso: <b>Qualquer pessoa</b>.</li>
-        <li>Copie a URL e cole aqui em cima.</li>
-      </ol>
-      <div style="font-size:12px;color:var(--sub);margin-top:12px">Os dados novos que você criar no app são enviados para a planilha. Use “Recarregar” para puxar o que está na planilha para o app. O app também atualiza sozinho a cada 1 minuto.</div>
+      <button class="primary-btn" id="sync-reload" style="background:var(--teal);margin-top:14px">Recarregar dados da planilha</button>
+      <div style="font-size:12px;color:var(--sub);margin-top:12px">O app também atualiza sozinho a cada 1 minuto.</div>
     </div>
     <div style="text-align:center;font-size:12px;color:var(--sub);margin:8px 0 4px">Stigmés · versão ${APP_VERSION}</div>`;
 }
@@ -911,31 +897,11 @@ function bindScreenEvents() {
   };
   }
   // Sync screen
-  const syncSave = $('#sync-save');
-  if (syncSave) syncSave.onclick = async () => {
-    SYNC.url = $('#sync-url').value.trim();
-    syncSave.textContent = 'Conectando...';
-    await SYNC.load();
-    // Agora que a planilha está conectada, garante o usuário logado nela
-    if (AUTH.user) AUTH.ensureMember();
-    render();
-  };
   const syncReload = $('#sync-reload');
   if (syncReload) syncReload.onclick = async () => {
     syncReload.textContent = 'Recarregando...';
     await SYNC.load();
     render();
-  };
-  const syncResend = $('#sync-resend');
-  if (syncResend) syncResend.onclick = () => {
-    const u = AUTH.user;
-    if (!u) { syncResend.textContent = 'Faça login primeiro'; return; }
-    // limpa as marcas de "já enviado" deste usuário e reenvia
-    localStorage.removeItem('stigmes_user_saved_' + u.id);
-    localStorage.removeItem('stigmes_part_saved_' + u.id + '_' + TRIP.id);
-    AUTH.ensureMember();
-    syncResend.textContent = 'Enviado ✓ (confira a planilha)';
-    setTimeout(() => { syncResend.textContent = 'Reenviar meu cadastro à planilha'; }, 2500);
   };
   const logoutBtn = $('#logout-btn');
   if (logoutBtn) logoutBtn.onclick = () => AUTH.signOut();
