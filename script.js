@@ -1,8 +1,8 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
-   Versão: 2026-08-12-c (editar/excluir roteiro)
+   Versão: 2026-08-12-e (dashboard reorganizado)
    ============================================================ */
-console.log('%cStigmés script versão 2026-08-12-c', 'color:#1E5AA8;font-weight:bold');
+console.log('%cStigmés script versão 2026-08-12-e', 'color:#1E5AA8;font-weight:bold');
 
 
 /* ---- Login com Google (Google Identity Services) ---- */
@@ -403,8 +403,12 @@ function renderTrips() {
     </div>`;
   }).join('');
 
-  const vazio = TRIPS.length === 0
+  const carregando = SYNC.url && SYNC.status === 'carregando' && TRIPS.length === 0;
+  const vazio = (!carregando && SYNC.url && TRIPS.length === 0)
     ? `<div class="empty">Nenhuma viagem ainda.<br>Crie a primeira no botão +.</div>`
+    : '';
+  const loadingBox = carregando
+    ? `<div class="empty"><div class="spinner"></div>Carregando suas viagens...</div>`
     : '';
 
   const semPlanilha = !SYNC.url
@@ -416,7 +420,7 @@ function renderTrips() {
     <h2 class="section-title serif">Para onde vamos?</h2>
     ${semPlanilha}
     <div class="trips-list">${cards}</div>
-    ${vazio}`;
+    ${loadingBox}${vazio}`;
 }
 
 // ============================================================
@@ -435,22 +439,12 @@ function renderDashboard() {
       <div class="count"><span class="num serif">${daysUntil(TRIP.start)}</span><span class="lbl">dias até a partida</span></div>
       <div class="plane">${svg('plane',120,'#fff')}</div>
     </div>
-    <div class="grid2">
-      <div class="card stat">${svg('users')}<div class="val serif">${MEMBERS.length}</div><div class="lbl">Participantes</div></div>
-      <div class="card stat">${svg('mappin')}<div class="val serif">${countCities()}</div><div class="lbl">Cidades</div></div>
-    </div>
+    ${nextActivityCard()}
     <div class="card" style="margin-top:12px">
       <div class="row-between"><span style="font-size:13px;color:var(--sub)">Orçamento consumido</span><span style="font-weight:700;color:${pct>80?C.gold:C.blue}">${pct}%</span></div>
       <div class="track"><div class="fill" style="width:${Math.min(pct,100)}%"></div></div>
       <div class="row-between" style="margin-top:10px;font-size:13px"><span>Gasto <b>${TRIP.currency}${spent}</b></span><span style="color:var(--sub)">de ${TRIP.currency}${TRIP.budget||0}</span></div>
-    </div>
-    ${nextActivityCard()}`;
-}
-
-function countCities() {
-  const set = {};
-  ITINERARY.forEach((d) => { if (d.city) set[d.city] = 1; });
-  return Object.keys(set).length;
+    </div>`;
 }
 
 function nextActivityCard() {
@@ -1081,17 +1075,23 @@ function init() {
   $('#config-btn').innerHTML = svg('settings',17);
   $('#config-btn').onclick = () => { current = 'sync'; window.scrollTo(0,0); render(); };
 
+  // Começa a carregar os dados JÁ (em paralelo com a splash), se logado e conectado.
+  // Assim, quando a splash sai, as viagens normalmente já chegaram.
+  let preload = null;
+  if (AUTH.user && SYNC.url) {
+    preload = SYNC.load().then((ok) => { if (ok) AUTH.ensureMember(); return ok; });
+  }
+
   // splash → depois decide entre login e app
   const splash = $('#splash');
-  setTimeout(() => splash.classList.add('leaving'), 2000);
+  setTimeout(() => splash.classList.add('leaving'), 1200);
   setTimeout(() => {
     splash.classList.add('gone');
     try {
-      if (AUTH.user) enterApp();
+      if (AUTH.user) enterApp(preload);
       else showLogin();
     } catch (err) {
       console.error('Falha ao inicializar login:', err);
-      // Nunca deixa o usuário preso: mostra a tela de login com saída de convidado
       forceGuestFallback('Ocorreu um erro ao iniciar o login.');
     }
   }, 2500);
@@ -1162,7 +1162,7 @@ function showLogin() {
 }
 
 // Entra no app depois de logado
-function enterApp() {
+function enterApp(preload) {
   const login = $('#login');
   login.classList.add('screen-hidden');
   login.style.display = 'none';
@@ -1183,17 +1183,20 @@ function enterApp() {
   TRIP = null;
   render();
 
-  // Se já houver planilha conectada, puxa dados, cadastra o usuário e mostra as viagens
+  // Reusa o carregamento já iniciado durante a splash (ou dispara agora)
   if (SYNC.url) {
-    SYNC.load().then((ok) => {
+    const done = (ok) => {
       if (ok) {
         AUTH.ensureMember();
-        // reabre a última viagem, se ainda existir
         const last = localStorage.getItem('stigmes_last_trip');
         if (last && TRIPS.find((t) => String(t.id) === String(last))) openTrip(last, true);
         else render();
+      } else {
+        render(); // mostra estado vazio/erro em vez de "carregando" infinito
       }
-    });
+    };
+    if (preload) preload.then(done);
+    else SYNC.load().then(done);
   }
 }
 
