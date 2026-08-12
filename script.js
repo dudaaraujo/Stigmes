@@ -4,7 +4,7 @@
 
 /* ---- Login com Google (Google Identity Services) ---- */
 // Cole aqui o seu Client ID (ver INSTALACAO.md → seção Login Google).
-const GOOGLE_CLIENT_ID = "COLE_SEU_CLIENT_ID_AQUI.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = "859071487984-7dnmm6tql49updmqrtnoj988refi81f1.apps.googleusercontent.com";
 
 const AUTH = {
   get user() {
