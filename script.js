@@ -55,16 +55,24 @@ const AUTH = {
       MEMBERS.unshift({ id: u.id, name: u.name, initials: u.initials, color: u.color, admin: true, canExpense: true });
     }
     if (!SYNC.url) return;
-    // (2) cadastro do usuário (uma vez por usuário)
+    // (2) cadastro do usuário — o Apps Script gera o id_usuario (contador) e a data.
+    //     Enviamos o google_id para ele reconhecer e não duplicar.
     const uKey = 'stigmes_user_saved_' + u.id;
     if (!localStorage.getItem(uKey)) {
-      SYNC.save('Usuarios', { id: u.id, name: u.fullName || u.name, email: u.email || '', picture: u.picture || '', initials: u.initials, color: u.color })
-        .then((r) => { if (r && r.ok) localStorage.setItem(uKey, '1'); });
+      SYNC.save('Usuarios', {
+        google_id: u.id,
+        nome: u.fullName || u.name,
+        email: u.email || '',
+        foto_url: u.picture || '',
+        iniciais: u.initials,
+        cor: u.color,
+      }).then((r) => { if (r && r.ok) localStorage.setItem(uKey, '1'); });
     }
-    // (3) participação na viagem (uma vez por usuário+viagem)
+    // (3) participação na viagem (uma vez por usuário+viagem).
+    //     userId usa o google_id como referência estável.
     const pKey = 'stigmes_part_saved_' + u.id + '_' + TRIP.id;
     if (!localStorage.getItem(pKey)) {
-      SYNC.save('Participantes', { id: u.id + '_' + TRIP.id, tripId: TRIP.id, userId: u.id, papel: 'admin', canExpense: true, status: 'ativo' })
+      SYNC.save('Participantes', { tripId: TRIP.id, userId: u.id, papel: 'admin', canExpense: true, status: 'ativo' })
         .then((r) => { if (r && r.ok) localStorage.setItem(pKey, '1'); });
     }
   },
@@ -91,19 +99,20 @@ const SYNC = {
     this.status = 'carregando';
     try {
       const data = await this.jsonp(this.url);
-      // Monta a lista de membros da viagem cruzando Usuarios × Participantes
+      // Monta a lista de membros da viagem cruzando Usuarios × Participantes.
+      // A ligação é pelo google_id (Participantes.userId === Usuarios.google_id).
       if (data.Usuarios && data.Usuarios.length) {
-        const usersById = {};
-        data.Usuarios.forEach((u) => { usersById[u.id] = u; });
+        const usersByGoogle = {};
+        data.Usuarios.forEach((u) => { if (u.google_id) usersByGoogle[u.google_id] = u; });
         const parts = (data.Participantes || []).filter((p) => String(p.tripId) === TRIP.id);
         if (parts.length) {
           MEMBERS = parts.map((p) => {
-            const u = usersById[p.userId] || {};
+            const u = usersByGoogle[p.userId] || {};
             return {
               id: p.userId,
-              name: (u.name || 'Usuário').split(/\s+/)[0],
-              initials: u.initials || '??',
-              color: u.color || '#1E5AA8',
+              name: (u.nome || 'Usuário').split(/\s+/)[0],
+              initials: u.iniciais || '??',
+              color: u.cor || '#1E5AA8',
               admin: String(p.papel) === 'admin',
               canExpense: p.canExpense === true || p.canExpense === 'TRUE' || p.canExpense === 'sim',
             };
@@ -578,6 +587,7 @@ function renderSync() {
       <input class="field" id="sync-url" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(url)}">
       <button class="primary-btn" id="sync-save">Salvar e conectar</button>
       <button class="primary-btn" id="sync-reload" style="background:var(--teal);margin-top:10px" ${url?'':'disabled'}>Recarregar dados da planilha</button>
+      <button class="primary-btn" id="sync-resend" style="background:var(--gold);margin-top:10px" ${url?'':'disabled'}>Reenviar meu cadastro à planilha</button>
     </div>
     <div class="card">
       <div class="mini-label" style="margin-bottom:10px">Como conectar</div>
@@ -627,9 +637,9 @@ function bindScreenEvents() {
     const p = PENDING.find((x) => x.id === b.dataset.approve);
     const novo = { id: p.id, name: p.name, initials: p.initials, color: p.color, admin: false, canExpense: false };
     MEMBERS.push(novo);
-    // Novo usuário + ligação com a viagem
-    SYNC.save('Usuarios', { id: p.id, name: p.name, email: '', picture: '', initials: p.initials, color: p.color });
-    SYNC.save('Participantes', { id: p.id + '_' + TRIP.id, tripId: TRIP.id, userId: p.id, papel: 'participante', canExpense: false, status: 'ativo' });
+    // Novo usuário (o Apps Script gera o contador) + ligação com a viagem
+    SYNC.save('Usuarios', { google_id: p.id, nome: p.name, email: '', foto_url: '', iniciais: p.initials, cor: p.color });
+    SYNC.save('Participantes', { tripId: TRIP.id, userId: p.id, papel: 'participante', canExpense: false, status: 'ativo' });
     PENDING = PENDING.filter((x) => x.id !== b.dataset.approve); render();
   });
   document.querySelectorAll('[data-reject]').forEach((b) => b.onclick = () => { PENDING = PENDING.filter((x) => x.id !== b.dataset.reject); render(); });
@@ -657,6 +667,17 @@ function bindScreenEvents() {
     syncReload.textContent = 'Recarregando...';
     await SYNC.load();
     render();
+  };
+  const syncResend = $('#sync-resend');
+  if (syncResend) syncResend.onclick = () => {
+    const u = AUTH.user;
+    if (!u) { syncResend.textContent = 'Faça login primeiro'; return; }
+    // limpa as marcas de "já enviado" deste usuário e reenvia
+    localStorage.removeItem('stigmes_user_saved_' + u.id);
+    localStorage.removeItem('stigmes_part_saved_' + u.id + '_' + TRIP.id);
+    AUTH.ensureMember();
+    syncResend.textContent = 'Enviado ✓ (confira a planilha)';
+    setTimeout(() => { syncResend.textContent = 'Reenviar meu cadastro à planilha'; }, 2500);
   };
   const logoutBtn = $('#logout-btn');
   if (logoutBtn) logoutBtn.onclick = () => AUTH.signOut();
