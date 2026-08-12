@@ -321,7 +321,8 @@ button { font-family: inherit; }
 .field-label { font-size: 12px; color: var(--sub); font-weight: 600; }
 .mt12 { margin-top: 12px; } .mt14 { margin-top: 14px; }
 .two-col { display: flex; gap: 10px; }
-.two-col > div { flex: 1; }
+.two-col > div { flex: 1 1 0; min-width: 0; }
+.two-col > div .field { width: 100%; }
 .primary-btn {
   width: 100%; margin-top: 16px; padding: 12px; border-radius: 11px; border: none;
   background: var(--blue); color: #fff; font-weight: 600; font-size: 14px; cursor: pointer;
