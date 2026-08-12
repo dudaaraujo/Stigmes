@@ -1,8 +1,8 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
-   Versão: 2026-08-12-b (modal sem piscar)
+   Versão: 2026-08-12-c (editar/excluir roteiro)
    ============================================================ */
-console.log('%cStigmés script versão 2026-08-12-b', 'color:#1E5AA8;font-weight:bold');
+console.log('%cStigmés script versão 2026-08-12-c', 'color:#1E5AA8;font-weight:bold');
 
 
 /* ---- Login com Google (Google Identity Services) ---- */
@@ -137,17 +137,26 @@ const SYNC = {
   // Salva uma linha. Usa "no-cors" como fallback: o Apps Script recebe,
   // mas o navegador não lê a resposta — por isso atualizamos o app localmente também.
   async save(sheet, row) {
+    return this._post({ sheet, row });
+  },
+  async update(sheet, id, row) {
+    return this._post({ sheet, action: 'update', id, row });
+  },
+  async remove(sheet, id) {
+    return this._post({ sheet, action: 'delete', id });
+  },
+  async _post(payload) {
     if (!this.url) return { ok: false, offline: true };
     try {
       await fetch(this.url, {
         method: 'POST',
-        mode: 'no-cors', // envia sem exigir leitura da resposta (evita bloqueio CORS)
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita preflight
-        body: JSON.stringify({ sheet, row }),
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
       });
       return { ok: true };
     } catch (err) {
-      console.error('Falha ao salvar na planilha:', err);
+      console.error('Falha ao gravar na planilha:', err);
       return { ok: false, error: String(err) };
     }
   },
@@ -180,7 +189,7 @@ function rebuildItinerary(rows) {
   rows.forEach((r) => {
     const d = Number(r.day) || 1;
     if (!byDay[d]) byDay[d] = { day: d, date: r.date || '', city: r.city || '', items: [] };
-    byDay[d].items.push({ time: fmtTime(r.time), name: r.name || '', place: r.place || '', cost: Number(r.cost) || 0, cat: r.cat || 'passeios' });
+    byDay[d].items.push({ id: r.id, time: fmtTime(r.time), name: r.name || '', place: r.place || '', cost: Number(r.cost) || 0, cat: r.cat || 'passeios' });
   });
   return Object.values(byDay).sort((a, b) => a.day - b.day)
     .map((d) => ({ ...d, items: d.items.sort((a, b) => String(a.time).localeCompare(String(b.time))) }));
@@ -540,7 +549,7 @@ function renderItinerary() {
       const cat = CATEGORIES[it.cat];
       return `<div class="tl-item">
         <div class="tl-dot" style="background:${cat.color}"></div>
-        <div class="tl-card"><div class="tl-time serif">${it.time}</div><div style="flex:1"><div class="tl-name">${esc(it.name)}</div><div class="tl-place">${esc(it.place)}</div></div>${it.cost>0?`<div class="tl-cost">${TRIP.currency}${it.cost}</div>`:''}</div>
+        <div class="tl-card tl-clickable" data-edit-day="${d.day}" data-edit-id="${esc(String(it.id))}"><div class="tl-time serif">${it.time}</div><div style="flex:1"><div class="tl-name">${esc(it.name)}</div><div class="tl-place">${esc(it.place)}</div></div>${it.cost>0?`<div class="tl-cost">${TRIP.currency}${it.cost}</div>`:''}</div>
       </div>`;
     }).join('');
     return `<div class="day">
@@ -738,6 +747,13 @@ function bindScreenEvents() {
   const clr = $('#itin-clear');
   if (clr) clr.onclick = () => { itinQuery = ''; render(); };
   document.querySelectorAll('[data-day]').forEach((b) => b.onclick = () => { const d = +b.dataset.day; dayOpen[d] = !dayOpen[d]; render(); });
+  document.querySelectorAll('[data-edit-id]').forEach((b) => b.onclick = () => {
+    const dayNum = +b.dataset.editDay;
+    const id = b.dataset.editId;
+    const day = ITINERARY.find((x) => x.day === dayNum);
+    const item = day && day.items.find((it) => String(it.id) === String(id));
+    if (item) openActivityModal(item, dayNum);
+  });
   // Likes
   document.querySelectorAll('[data-like]').forEach((b) => b.onclick = () => { const id = +b.dataset.like; liked[id] = !liked[id]; render(); });
   // Admin actions
@@ -840,29 +856,32 @@ function openExpenseModal() {
   draw();
 }
 
-function openActivityModal() {
-  // Se já há dias, permite escolher; sempre permite criar um novo dia.
+function openActivityModal(editItem, editDay) {
+  const isEdit = !!editItem;
   const temDias = ITINERARY.length > 0;
-  let form = {
-    modo: temDias ? 'existente' : 'novo',   // 'existente' | 'novo'
-    day: temDias ? String(ITINERARY[0].day) : '',
-    novoDia: temDias ? String(Math.max.apply(null, ITINERARY.map((d) => d.day)) + 1) : '1',
-    novaData: '', novaCidade: '',
-    time: '', name: '', place: '', cost: '', cat: 'passeios',
-  };
+  let form = isEdit
+    ? { modo: 'existente', day: String(editDay), novoDia: '', novaData: '', novaCidade: '',
+        time: editItem.time || '', name: editItem.name || '', place: editItem.place || '',
+        cost: editItem.cost != null ? String(editItem.cost) : '', cat: editItem.cat || 'passeios',
+        editId: editItem.id, editDay: editDay }
+    : { modo: temDias ? 'existente' : 'novo',
+        day: temDias ? String(ITINERARY[0].day) : '',
+        novoDia: temDias ? String(Math.max.apply(null, ITINERARY.map((d) => d.day)) + 1) : '1',
+        novaData: '', novaCidade: '',
+        time: '', name: '', place: '', cost: '', cat: 'passeios' };
   function draw() {
     const dayOpts = ITINERARY.map((d) => `<option value="${d.day}" ${+form.day===d.day?'selected':''}>Dia ${d.day} · ${esc(d.city)} (${esc(d.date)})</option>`).join('');
     const catChips = Object.entries(CATEGORIES).map(([k,c]) => `<button class="chip ${form.cat===k?'on':''}" data-cat="${k}" style="${form.cat===k?`border-color:${c.color};background:${c.color}18;color:${c.color}`:''}">${svg(c.icon,14,form.cat===k?c.color:'currentColor')} ${c.label}</button>`).join('');
 
-    // seletor de "onde adicionar": dia existente ou novo dia
-    const escolha = temDias ? `
+    // seletor de "onde adicionar": dia existente ou novo dia (só ao criar)
+    const escolha = (temDias && !isEdit) ? `
       <div class="field-label">Onde adicionar</div>
       <div class="chips" style="margin-bottom:4px">
         <button class="chip ${form.modo==='existente'?'on':''}" data-modo="existente" style="${form.modo==='existente'?`border-color:${C.blue};background:${C.blue}15;color:${C.blue}`:''}">Dia existente</button>
         <button class="chip ${form.modo==='novo'?'on':''}" data-modo="novo" style="${form.modo==='novo'?`border-color:${C.blue};background:${C.blue}15;color:${C.blue}`:''}">Novo dia</button>
       </div>` : '';
 
-    const blocoExistente = (temDias && form.modo === 'existente')
+    const blocoExistente = (temDias && form.modo === 'existente' && !isEdit)
       ? `<div class="field-label mt14">Dia</div><select class="field" id="f-day">${dayOpts}</select>`
       : '';
 
@@ -875,13 +894,14 @@ function openActivityModal() {
 
     overlay().innerHTML = `<div class="modal">
       <div class="modal-grab"></div>
-      <div class="modal-head"><h3 class="serif">Nova atividade</h3><button id="m-close">${svg('x',20)}</button></div>
+      <div class="modal-head"><h3 class="serif">${isEdit ? 'Editar atividade' : 'Nova atividade'}</h3><button id="m-close">${svg('x',20)}</button></div>
       ${escolha}${blocoExistente}${blocoNovo}
       <div class="two-col"><div><div class="field-label mt14">Horário</div><input class="field" id="f-time" type="time" value="${form.time}"></div><div><div class="field-label mt14">Valor estimado (${TRIP.currency})</div><input class="field" id="f-cost" type="number" placeholder="0" value="${form.cost}"></div></div>
       <div class="field-label mt14">Atividade</div><input class="field" id="f-name" placeholder="Ex.: Museu do Louvre" value="${esc(form.name)}">
       <div class="field-label mt14">Local / endereço</div><input class="field" id="f-place" placeholder="Ex.: Rue de Rivoli" value="${esc(form.place)}">
       <div class="field-label mt14">Categoria</div><div class="chips">${catChips}</div>
-      <button class="primary-btn" id="m-save" ${valid?'':'disabled'}>Adicionar ao roteiro</button>
+      <button class="primary-btn" id="m-save" ${valid?'':'disabled'}>${isEdit ? 'Salvar alterações' : 'Adicionar ao roteiro'}</button>
+      ${isEdit ? `<button class="primary-btn" id="m-delete" style="background:var(--clay);margin-top:10px">Excluir atividade</button>` : ''}
     </div>`;
     overlay().classList.remove('hidden');
     $('#m-close').onclick = closeModal;
@@ -900,7 +920,40 @@ function openActivityModal() {
       const ok = form.name.trim() && form.time.trim() && (form.modo === 'existente' ? !!form.day : (form.novoDia && form.novaCidade.trim()));
       const btn = $('#m-save'); if (btn) btn.disabled = !ok;
     }
+    // Excluir (só no modo edição)
+    const del = $('#m-delete');
+    if (del) del.onclick = () => {
+      const day = ITINERARY.find((x) => x.day === +form.editDay);
+      if (day) day.items = day.items.filter((it) => String(it.id) !== String(form.editId));
+      // remove o dia se ficou vazio
+      const idx = ITINERARY.findIndex((x) => x.day === +form.editDay);
+      if (idx >= 0 && ITINERARY[idx].items.length === 0) ITINERARY.splice(idx, 1);
+      SYNC.remove('Roteiro', form.editId);
+      closeModal(); render();
+    };
     $('#m-save').onclick = () => {
+      if (!(form.name.trim() && form.time.trim())) return;
+
+      if (isEdit) {
+        // Atualiza a atividade existente (mantém o dia)
+        const day = ITINERARY.find((x) => x.day === +form.editDay);
+        if (day) {
+          const it = day.items.find((x) => String(x.id) === String(form.editId));
+          if (it) {
+            it.time = form.time; it.name = form.name.trim(); it.place = form.place.trim();
+            it.cost = +form.cost || 0; it.cat = form.cat;
+            day.items.sort((a,b) => a.time.localeCompare(b.time));
+          }
+        }
+        SYNC.update('Roteiro', form.editId, {
+          time: form.time, name: form.name.trim(), place: form.place.trim(),
+          cost: +form.cost || 0, cat: form.cat,
+        });
+        closeModal(); render();
+        return;
+      }
+
+      // Criação
       let dayNum, dayDate, dayCity;
       if (form.modo === 'existente') {
         const d = ITINERARY.find((x) => x.day === +form.day);
@@ -908,19 +961,17 @@ function openActivityModal() {
         dayNum = d.day; dayDate = d.date; dayCity = d.city;
       } else {
         dayNum = +form.novoDia || (ITINERARY.length ? Math.max.apply(null, ITINERARY.map((d) => d.day)) + 1 : 1);
-        // formata a data escolhida (YYYY-MM-DD → "08 Jul")
         dayDate = form.novaData ? new Date(form.novaData).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '') : '';
         dayCity = form.novaCidade.trim();
       }
-      if (!(form.name.trim() && form.time.trim())) return;
-
       let day = ITINERARY.find((x) => x.day === dayNum);
       if (!day) { day = { day: dayNum, date: dayDate, city: dayCity, items: [] }; ITINERARY.push(day); ITINERARY.sort((a,b) => a.day - b.day); }
-      const item = { time: form.time, name: form.name.trim(), place: form.place.trim(), cost: +form.cost||0, cat: form.cat };
+      const novoId = Date.now();
+      const item = { id: novoId, time: form.time, name: form.name.trim(), place: form.place.trim(), cost: +form.cost||0, cat: form.cat };
       day.items.push(item);
       day.items.sort((a,b) => a.time.localeCompare(b.time));
       dayOpen[day.day] = true;
-      SYNC.save('Roteiro', { id: Date.now(), tripId: TRIP.id, day: day.day, date: day.date, city: day.city, time: item.time, name: item.name, place: item.place, cost: item.cost, cat: item.cat });
+      SYNC.save('Roteiro', { id: novoId, tripId: TRIP.id, day: day.day, date: day.date, city: day.city, time: item.time, name: item.name, place: item.place, cost: item.cost, cat: item.cat });
       closeModal(); render();
     };
   }
