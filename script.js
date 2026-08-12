@@ -1,8 +1,8 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
-   Versão: 2026-08-12-j (convites)
+   Versão: 2026-08-12-l (registro no login)
    ============================================================ */
-console.log('%cStigmés script versão 2026-08-12-j', 'color:#1E5AA8;font-weight:bold');
+console.log('%cStigmés script versão 2026-08-12-l', 'color:#1E5AA8;font-weight:bold');
 
 
 /* ---- Login com Google (Google Identity Services) ---- */
@@ -47,25 +47,21 @@ const AUTH = {
     enterApp();
   },
 
-  // Garante que o usuário logado está: (1) na lista local, (2) na aba Usuarios,
-  // e (3) ligado à viagem atual na aba Participantes.
-  // Seguro para chamar várias vezes: cada envio só acontece uma vez.
   // Cadastra o usuário logado na aba Usuarios (não mexe em Participantes;
   // isso acontece ao criar ou entrar numa viagem).
+  // O Apps Script (upsertUser_) reconhece pelo google_id e nunca duplica,
+  // então é seguro enviar sempre que a pessoa loga.
   ensureMember() {
     const u = AUTH.user;
     if (!u || !SYNC.url) return;
-    const uKey = 'stigmes_user_saved_' + u.id;
-    if (!localStorage.getItem(uKey)) {
-      SYNC.save('Usuarios', {
-        google_id: u.id,
-        nome: u.fullName || u.name,
-        email: u.email || '',
-        foto_url: u.picture || '',
-        iniciais: u.initials,
-        cor: u.color,
-      }).then((r) => { if (r && r.ok) localStorage.setItem(uKey, '1'); });
-    }
+    SYNC.save('Usuarios', {
+      google_id: u.id,
+      nome: u.fullName || u.name,
+      email: u.email || '',
+      foto_url: u.picture || '',
+      iniciais: u.initials,
+      cor: u.color,
+    });
   },
 
   signOut() {
@@ -80,8 +76,9 @@ const AUTH = {
 };
 
 /* ---- Sincronização com Google Sheets (via Apps Script) ---- */
+const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbzt3ePy6d49gxtDARqgJYdmVaHenRSh9zAkHqwZinlBuFpA9y6vfmZ7iK57BPhSWCepjg/exec';
 const SYNC = {
-  get url() { return localStorage.getItem('stigmes_sheet_url') || ''; },
+  get url() { return localStorage.getItem('stigmes_sheet_url') || DEFAULT_SHEET_URL; },
   set url(v) { localStorage.setItem('stigmes_sheet_url', v || ''); },
   status: 'off', // off | ok | erro | ...
 
