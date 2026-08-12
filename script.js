@@ -1,8 +1,8 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
-   Versão: 2026-08-12-h (orçamento pessoal)
+   Versão: 2026-08-12-j (convites)
    ============================================================ */
-console.log('%cStigmés script versão 2026-08-12-h', 'color:#1E5AA8;font-weight:bold');
+console.log('%cStigmés script versão 2026-08-12-j', 'color:#1E5AA8;font-weight:bold');
 
 
 /* ---- Login com Google (Google Identity Services) ---- */
@@ -228,7 +228,7 @@ function openTrip(tripId, goToHome) {
     .filter((p) => String(p.tripId) === String(t.id) && String(p.status) === 'pendente')
     .map((p) => {
       const u = usersByGoogle[p.userId] || {};
-      return { id: p.userId, name: u.nome || 'Usuário', initials: u.iniciais || '??', color: u.cor || '#7B6CA8', kind: 'Pedido para entrar', time: '' };
+      return { id: p.userId, partId: p.id, name: u.nome || 'Usuário', initials: u.iniciais || '??', color: u.cor || '#7B6CA8', kind: 'Pedido para entrar', time: '' };
     });
 
   // Despesas desta viagem
@@ -257,9 +257,23 @@ function closeTrip() {
 }
 
 // Sou participante desta viagem?
-function amMember(tripId) {
+function inviteCode(trip) {
+  // Código fixo: só as letras do nome/destino + id da viagem no fim (estável e legível)
+  const base = ((trip.name || '') + (trip.destination || ''))
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // tira acentos
+    .toUpperCase().replace(/[^A-Z]/g, '');             // só letras
+  const letras = (base || 'VIAGEM').slice(0, 8);
+  return letras + '-' + String(trip.id);
+}
+
+function myStatus(tripId) {
   const meG = AUTH.user && AUTH.user.id;
-  return (ALL && ALL.Participantes || []).some((p) => String(p.tripId) === String(tripId) && String(p.userId) === String(meG));
+  const p = (ALL && ALL.Participantes || []).find((x) => String(x.tripId) === String(tripId) && String(x.userId) === String(meG));
+  if (!p) return null;
+  return String(p.status) === 'pendente' ? 'pendente' : 'ativo';
+}
+function amMember(tripId) {
+  return myStatus(tripId) === 'ativo';
 }
 
 // ---- Ícones SVG (Feather-style) ----
@@ -271,6 +285,8 @@ const ICON = {
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
   sun: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
   mappin: '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
@@ -388,19 +404,19 @@ function settle(net) {
 // ============================================================
 function renderTrips() {
   const cards = TRIPS.map((t) => {
-    const sou = amMember(t.id);
+    const st = myStatus(t.id);
     const dias = t.start ? daysUntil(t.start) : null;
+    let acao;
+    if (st === 'ativo') acao = `<button class="trip-open" data-open="${esc(t.id)}">Abrir</button>`;
+    else if (st === 'pendente') acao = `<button class="trip-open" disabled style="opacity:.6">${svg('clock',14)} Aguardando aprovação</button>`;
+    else acao = `<button class="trip-join" data-join="${esc(t.id)}">Participar</button>`;
     return `<div class="trip-card">
       <div class="trip-cover"></div>
       <div class="trip-body">
         <div class="trip-name serif">${esc(t.name)}</div>
         <div class="trip-dest">${t.destination ? svg('mappin',13) + ' ' + esc(t.destination) : ''}</div>
         <div class="trip-meta">${dias !== null && dias > 0 ? `faltam ${dias} dias` : (t.start ? 'em andamento' : '')} ${t.budget ? '· ' + t.currency + Number(t.budget).toLocaleString('pt-BR') : ''}</div>
-        <div class="trip-actions">
-          ${sou
-            ? `<button class="trip-open" data-open="${esc(t.id)}">Abrir</button>`
-            : `<button class="trip-join" data-join="${esc(t.id)}">Participar</button>`}
-        </div>
+        <div class="trip-actions">${acao}</div>
       </div>
     </div>`;
   }).join('');
@@ -417,10 +433,15 @@ function renderTrips() {
     ? `<div class="card"><div style="font-size:13px;color:var(--sub)">Conecte sua planilha em Configurações (engrenagem no topo) para ver e salvar viagens.</div></div>`
     : '';
 
+  const codeEntry = SYNC.url
+    ? `<button class="code-entry-btn" id="open-code">${svg('ticket',15)} Entrar com código</button>`
+    : '';
+
   return `
     <div class="eyebrow">Suas viagens</div>
     <h2 class="section-title serif">Para onde vamos?</h2>
     ${semPlanilha}
+    ${codeEntry}
     <div class="trips-list">${cards}</div>
     ${loadingBox}${vazio}`;
 }
@@ -480,7 +501,7 @@ function renderBudget() {
 
   const gastos = EXPENSES.map((e) => {
     const cat = CATEGORIES[e.cat];
-    return `<div class="expense">
+    return `<div class="expense expense-clickable" data-edit-expense="${esc(String(e.id))}">
       <div class="ico" style="background:${cat.color}18">${svg(cat.icon,18,cat.color)}</div>
       <div class="info"><div class="desc">${esc(e.desc)}</div><div class="meta">${esc(e.date)} · pago por ${member(e.paidBy).name} · ÷${e.split.length}</div></div>
       <div class="amt serif">${TRIP.currency}${e.amount}</div>
@@ -680,10 +701,15 @@ function renderAdmin() {
       ${pending}
     </div>
     <div class="card admin-block">
-      <div class="row-between" style="margin-bottom:14px">
-        <span class="mini-label admin-title">${svg('users',14)} Participantes</span>
-        <button class="invite-btn">${svg('userplus',15)} Convidar</button>
+      <div class="mini-label admin-title" style="margin-bottom:6px">${svg('userplus',14)} Convidar por código</div>
+      <div style="font-size:12.5px;color:var(--sub);margin-bottom:12px">Compartilhe este código. Quem digitá-lo entra direto, sem precisar de aprovação.</div>
+      <div class="invite-code-box">
+        <code class="invite-code" id="invite-code">${inviteCode(TRIP)}</code>
+        <button class="copy-btn" id="copy-code">${svg('copy',15)} Copiar</button>
       </div>
+    </div>
+    <div class="card admin-block">
+      <div class="mini-label admin-title" style="margin-bottom:14px">${svg('users',14)} Participantes</div>
       ${members}
     </div>
     <div class="card admin-block">
@@ -771,19 +797,25 @@ function render() {
 function bindScreenEvents() {
   // Lista de viagens
   document.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => openTrip(b.dataset.open, true));
+  const openCode = $('#open-code');
+  if (openCode) openCode.onclick = () => openCodeModal();
   document.querySelectorAll('[data-join]').forEach((b) => b.onclick = async () => {
     const tripId = b.dataset.join;
-    b.textContent = 'Entrando...';
+    b.textContent = 'Enviando pedido...';
     if (AUTH.user) {
-      await SYNC.save('Participantes', { tripId: tripId, userId: AUTH.user.id, papel: 'participante', canExpense: true, status: 'ativo' });
+      await SYNC.save('Participantes', { tripId: tripId, userId: AUTH.user.id, papel: 'participante', canExpense: true, status: 'pendente' });
       await SYNC.load();
     }
-    openTrip(tripId, true);
+    render();
   });
   const heroBack = $('#hero-back');
   if (heroBack) heroBack.onclick = () => closeTrip();
   // Budget tabs
   document.querySelectorAll('[data-btab]').forEach((b) => b.onclick = () => { budgetTab = b.dataset.btab; render(); });
+  document.querySelectorAll('[data-edit-expense]').forEach((b) => b.onclick = () => {
+    const e = EXPENSES.find((x) => String(x.id) === String(b.dataset.editExpense));
+    if (e) openExpenseModal(e);
+  });
   // Itinerary search
   const s = $('#itin-search');
   if (s) s.oninput = (e) => { itinQuery = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#itin-search'); if (n) { n.focus(); n.setSelectionRange(pos,pos); } };
@@ -800,16 +832,27 @@ function bindScreenEvents() {
   // Likes
   document.querySelectorAll('[data-like]').forEach((b) => b.onclick = () => { const id = +b.dataset.like; liked[id] = !liked[id]; render(); });
   // Admin actions
+  const copyBtn = $('#copy-code');
+  if (copyBtn) copyBtn.onclick = () => {
+    const code = $('#invite-code') ? $('#invite-code').textContent : '';
+    const done = () => { copyBtn.innerHTML = svg('check',15) + ' Copiado!'; setTimeout(() => { copyBtn.innerHTML = svg('copy',15) + ' Copiar'; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done).catch(done);
+    else done();
+  };
   document.querySelectorAll('[data-approve]').forEach((b) => b.onclick = () => {
     const p = PENDING.find((x) => x.id === b.dataset.approve);
-    const novo = { id: p.id, name: p.name, initials: p.initials, color: p.color, admin: false, canExpense: false };
+    if (!p) return;
+    const novo = { id: p.id, partId: p.partId, name: (p.name||'Usuário').split(/\s+/)[0], initials: p.initials, color: p.color, admin: false, canExpense: true, orcamento: 0 };
     MEMBERS.push(novo);
-    // Novo usuário (o Apps Script gera o contador) + ligação com a viagem
-    SYNC.save('Usuarios', { google_id: p.id, nome: p.name, email: '', foto_url: '', iniciais: p.initials, cor: p.color });
-    SYNC.save('Participantes', { tripId: TRIP.id, userId: p.id, papel: 'participante', canExpense: false, status: 'ativo' });
+    // Já existe como pendente: só muda o status para ativo
+    if (p.partId) SYNC.update('Participantes', p.partId, { status: 'ativo' });
     PENDING = PENDING.filter((x) => x.id !== b.dataset.approve); render();
   });
-  document.querySelectorAll('[data-reject]').forEach((b) => b.onclick = () => { PENDING = PENDING.filter((x) => x.id !== b.dataset.reject); render(); });
+  document.querySelectorAll('[data-reject]').forEach((b) => b.onclick = () => {
+    const p = PENDING.find((x) => x.id === b.dataset.reject);
+    if (p && p.partId) SYNC.remove('Participantes', p.partId);
+    PENDING = PENDING.filter((x) => x.id !== b.dataset.reject); render();
+  });
   document.querySelectorAll('[data-remove]').forEach((b) => b.onclick = () => { MEMBERS = MEMBERS.filter((m) => m.id !== b.dataset.remove); render(); });
   document.querySelectorAll('[data-toggle-admin]').forEach((b) => b.onclick = () => { const m = MEMBERS.find((x) => x.id === b.dataset.toggleAdmin); m.admin = !m.admin; if (m.partId) SYNC.update('Participantes', m.partId, { papel: m.admin ? 'admin' : 'participante' }); render(); });
   document.querySelectorAll('[data-toggle-expense]').forEach((b) => b.onclick = () => { const m = MEMBERS.find((x) => x.id === b.dataset.toggleExpense); m.canExpense = !m.canExpense; if (m.partId) SYNC.update('Participantes', m.partId, { canExpense: m.canExpense }); render(); });
@@ -862,8 +905,43 @@ function bindScreenEvents() {
 const overlay = () => $('#modal-overlay');
 function closeModal() { overlay().classList.add('hidden'); overlay().innerHTML = ''; }
 
-function openExpenseModal() {
-  let form = { desc: '', amount: '', cat: 'alimentacao', date: '', paidBy: meId(), split: MEMBERS.map((m) => m.id) };
+function openCodeModal() {
+  let code = '';
+  overlay().innerHTML = `<div class="modal">
+    <div class="modal-grab"></div>
+    <div class="modal-head"><h3 class="serif">Entrar com código</h3><button id="m-close">${svg('x',20)}</button></div>
+    <div style="font-size:13px;color:var(--sub);margin-bottom:12px">Digite o código que o organizador da viagem te enviou. Você entra na hora, sem esperar aprovação.</div>
+    <div class="field-label">Código da viagem</div>
+    <input class="field" id="f-code" placeholder="Ex.: ESPANHA2026" style="text-transform:uppercase" autocomplete="off">
+    <div id="code-msg" style="font-size:12.5px;color:var(--clay);margin-top:8px;min-height:16px"></div>
+    <button class="primary-btn" id="m-join" disabled>Entrar na viagem</button>
+  </div>`;
+  overlay().classList.remove('hidden');
+  $('#m-close').onclick = closeModal;
+  const inp = $('#f-code');
+  inp.oninput = (e) => { code = e.target.value.trim().toUpperCase(); const b = $('#m-join'); if (b) b.disabled = !code; $('#code-msg').textContent = ''; };
+  $('#m-join').onclick = async () => {
+    const norm = (s) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const alvo = TRIPS.find((t) => norm(inviteCode(t)) === norm(code));
+    if (!alvo) { $('#code-msg').textContent = 'Código não encontrado. Confira com o organizador.'; return; }
+    if (myStatus(alvo.id) === 'ativo') { $('#code-msg').style.color = C.teal; $('#code-msg').textContent = 'Você já participa desta viagem.'; return; }
+    const btn = $('#m-join'); btn.disabled = true; btn.textContent = 'Entrando...';
+    if (AUTH.user) {
+      await SYNC.save('Participantes', { tripId: alvo.id, userId: AUTH.user.id, papel: 'participante', canExpense: true, status: 'ativo' });
+      await SYNC.load();
+    }
+    closeModal();
+    openTrip(alvo.id, true);
+  };
+  setTimeout(() => { const n = $('#f-code'); if (n) n.focus(); }, 50);
+}
+
+function openExpenseModal(editExp) {
+  const isEdit = !!editExp;
+  let form = isEdit
+    ? { desc: editExp.desc || '', amount: String(editExp.amount || ''), cat: editExp.cat || 'alimentacao',
+        date: '', paidBy: editExp.paidBy, split: (editExp.split || []).slice(), editId: editExp.id }
+    : { desc: '', amount: '', cat: 'alimentacao', date: '', paidBy: meId(), split: MEMBERS.map((m) => m.id) };
   function draw() {
     const catChips = Object.entries(CATEGORIES).map(([k,c]) => `<button class="chip ${form.cat===k?'on':''}" data-cat="${k}" style="${form.cat===k?`border-color:${c.color};background:${c.color}18;color:${c.color}`:''}">${svg(c.icon,14,form.cat===k?c.color:'currentColor')} ${c.label}</button>`).join('');
     const payChips = MEMBERS.map((m) => `<button class="chip pay ${form.paidBy===m.id?'on':''}" data-pay="${m.id}" style="${form.paidBy===m.id?`border-color:${C.blue};background:${C.blue}15;color:${C.blue}`:''}">${avatar(m.id,24)} ${m.name}</button>`).join('');
@@ -872,13 +950,14 @@ function openExpenseModal() {
     const valid = form.desc.trim() && +form.amount && form.split.length;
     overlay().innerHTML = `<div class="modal">
       <div class="modal-grab"></div>
-      <div class="modal-head"><h3 class="serif">Nova despesa</h3><button id="m-close">${svg('x',20)}</button></div>
+      <div class="modal-head"><h3 class="serif">${isEdit ? 'Editar despesa' : 'Nova despesa'}</h3><button id="m-close">${svg('x',20)}</button></div>
       <div class="field-label">Descrição</div><input class="field" id="f-desc" placeholder="Ex.: Hotel em Paris" value="${esc(form.desc)}">
       <div class="two-col"><div><div class="field-label mt14">Valor (${TRIP.currency})</div><input class="field" id="f-amount" type="number" placeholder="0" value="${form.amount}"></div><div><div class="field-label mt14">Data</div><input class="field" id="f-date" type="date" value="${form.date}"></div></div>
       <div class="field-label mt14">Categoria</div><div class="chips">${catChips}</div>
       <div class="field-label mt14">Quem pagou</div><div class="chips">${payChips}</div>
       <div class="row-between mt14"><span class="field-label">Dividir entre · igualitária</span><span class="per-person" id="per-person">${perPerson}</span></div><div class="chips">${splitChips}</div>
-      <button class="primary-btn" id="m-save" ${valid?'':'disabled'}>Adicionar despesa</button>
+      <button class="primary-btn" id="m-save" ${valid?'':'disabled'}>${isEdit ? 'Salvar alterações' : 'Adicionar despesa'}</button>
+      ${isEdit ? `<button class="primary-btn" id="m-delete" style="background:var(--clay);margin-top:10px">Excluir despesa</button>` : ''}
     </div>`;
     overlay().classList.remove('hidden');
     $('#m-close').onclick = closeModal;
@@ -893,8 +972,31 @@ function openExpenseModal() {
       const el = $('#per-person');
       if (el) el.textContent = (form.split.length && +form.amount) ? `${TRIP.currency}${(+form.amount/form.split.length).toFixed(2)} por pessoa` : '';
     }
+    const del = $('#m-delete');
+    if (del) del.onclick = () => {
+      EXPENSES = EXPENSES.filter((e) => String(e.id) !== String(form.editId));
+      SYNC.remove('Despesas', form.editId);
+      closeModal(); render();
+    };
     $('#m-save').onclick = () => {
       if (!(form.desc.trim() && +form.amount && form.split.length)) return;
+
+      if (isEdit) {
+        const e = EXPENSES.find((x) => String(x.id) === String(form.editId));
+        if (e) {
+          e.desc = form.desc.trim(); e.cat = form.cat; e.amount = +form.amount;
+          e.paidBy = form.paidBy; e.split = form.split.slice();
+          if (form.date) e.date = new Date(form.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}).replace('.','');
+        }
+        SYNC.update('Despesas', form.editId, {
+          desc: form.desc.trim(), cat: form.cat, amount: +form.amount,
+          paidBy: form.paidBy, split: form.split.slice(),
+          ...(form.date ? { date: new Date(form.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}).replace('.','') } : {}),
+        });
+        closeModal(); render();
+        return;
+      }
+
       const date = form.date ? new Date(form.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}).replace('.','') : 'Hoje';
       const novo = { id: Date.now(), tripId: TRIP.id, desc: form.desc.trim(), cat: form.cat, amount: +form.amount, paidBy: form.paidBy, split: form.split.slice(), date };
       EXPENSES.unshift(novo);
