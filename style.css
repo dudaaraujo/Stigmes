@@ -322,7 +322,16 @@ button { font-family: inherit; }
 .mt12 { margin-top: 12px; } .mt14 { margin-top: 14px; }
 .two-col { display: flex; gap: 10px; }
 .two-col > div { flex: 1 1 0; min-width: 0; }
-.two-col > div .field { width: 100%; }
+.two-col > div .field { width: 100%; min-width: 0; box-sizing: border-box; }
+/* iOS: inputs time/date/number têm largura mínima própria e vazam a coluna; forçamos encolher */
+input.field[type="time"], input.field[type="date"], input.field[type="number"] {
+  min-width: 0; width: 100%; box-sizing: border-box;
+}
+input.field[type="number"] { -webkit-appearance: none; appearance: none; }
+/* Telas bem estreitas: empilha as duas colunas para nunca sobrepor no iOS */
+@media (max-width: 360px) {
+  .two-col { flex-direction: column; gap: 0; }
+}
 .primary-btn {
   width: 100%; margin-top: 16px; padding: 12px; border-radius: 11px; border: none;
   background: var(--blue); color: #fff; font-weight: 600; font-size: 14px; cursor: pointer;
