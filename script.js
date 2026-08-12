@@ -2,6 +2,63 @@
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
 
+/* ---- Login com Google (Google Identity Services) ---- */
+// Cole aqui o seu Client ID (ver INSTALACAO.md → seção Login Google).
+const GOOGLE_CLIENT_ID = "859071487984-7dnmm6tql49updmqrtnoj988refi81f1.apps.googleusercontent.com";
+
+const AUTH = {
+  get user() {
+    try { return JSON.parse(localStorage.getItem('stigmes_user') || 'null'); }
+    catch { return null; }
+  },
+  set user(u) {
+    if (u) localStorage.setItem('stigmes_user', JSON.stringify(u));
+    else localStorage.removeItem('stigmes_user');
+  },
+
+  // Decodifica o token JWT que o Google devolve (só a parte de dados, sem validar assinatura)
+  decode(jwt) {
+    try {
+      const base = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const json = decodeURIComponent(atob(base).split('').map((c) =>
+        '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+      return JSON.parse(json);
+    } catch { return null; }
+  },
+
+  // Chamado pelo Google quando o login dá certo
+  handleCredential(response) {
+    const info = AUTH.decode(response.credential);
+    if (!info) return;
+    const first = (info.given_name || info.name || 'Você').trim();
+    AUTH.user = {
+      id: 'g_' + (info.sub || Date.now()),
+      name: first,
+      fullName: info.name || first,
+      email: info.email || '',
+      picture: info.picture || '',
+      initials: (info.name || first).split(/\s+/).map((s) => s[0]).slice(0, 2).join('').toUpperCase(),
+      color: '#1E5AA8',
+    };
+    // Garante que o usuário logado existe na lista de participantes
+    if (!MEMBERS.find((m) => m.id === AUTH.user.id)) {
+      MEMBERS.unshift({ id: AUTH.user.id, name: AUTH.user.name, initials: AUTH.user.initials, color: AUTH.user.color, admin: true, canExpense: true });
+      if (SYNC.url) SYNC.save('Participantes', { id: AUTH.user.id, name: AUTH.user.name, initials: AUTH.user.initials, color: AUTH.user.color, admin: true, canExpense: true });
+    }
+    enterApp();
+  },
+
+  signOut() {
+    AUTH.user = null;
+    if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
+    location.reload();
+  },
+
+  configured() {
+    return GOOGLE_CLIENT_ID && !GOOGLE_CLIENT_ID.startsWith('COLE_');
+  },
+};
+
 /* ---- Sincronização com Google Sheets (via Apps Script) ---- */
 const SYNC = {
   get url() { return localStorage.getItem('stigmes_sheet_url') || ''; },
@@ -200,6 +257,7 @@ let POSTS = [
 // ---- Helpers ----
 const $ = (sel) => document.querySelector(sel);
 const member = (id) => MEMBERS.find((m) => m.id === id) || PENDING.find((m) => m.id === id);
+const meId = () => (AUTH.user && MEMBERS.find((m) => m.id === AUTH.user.id)) ? AUTH.user.id : MEMBERS[0].id;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
 function daysUntil(date) {
@@ -461,11 +519,22 @@ function renderSync() {
     erro: { txt: 'Erro ao conectar', color: C.clay },
   };
   const st = statusMap[SYNC.status] || statusMap.off;
+  const u = AUTH.user;
+  const accountBlock = u ? `
+    <div class="card">
+      <div class="mini-label" style="margin-bottom:12px">Sua conta</div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="avatar" style="width:44px;height:44px;background:${u.color};font-size:15px;overflow:hidden">${u.picture?`<img src="${u.picture}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`:u.initials}</div>
+        <div style="flex:1;min-width:0"><div style="font-weight:600">${esc(u.fullName || u.name)}</div><div style="font-size:12px;color:var(--sub)">${esc(u.email || 'sessão local')}</div></div>
+      </div>
+      <button class="primary-btn" id="logout-btn" style="background:var(--clay)">Sair da conta</button>
+    </div>` : '';
   return `
     <div class="eyebrow">Integração</div>
-    <h2 class="section-title serif">Planilha Google</h2>
+    <h2 class="section-title serif">Planilha &amp; conta</h2>
+    ${accountBlock}
     <div class="card">
-      <div class="row-between"><span style="font-size:13px;color:var(--sub)">Status</span><span style="font-weight:700;color:${st.color}">${st.txt}</span></div>
+      <div class="row-between"><span style="font-size:13px;color:var(--sub)">Status da planilha</span><span style="font-weight:700;color:${st.color}">${st.txt}</span></div>
       <div class="field-label mt14">Link do app da planilha (Apps Script)</div>
       <input class="field" id="sync-url" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(url)}">
       <button class="primary-btn" id="sync-save">Salvar e conectar</button>
@@ -546,6 +615,8 @@ function bindScreenEvents() {
     await SYNC.load();
     render();
   };
+  const logoutBtn = $('#logout-btn');
+  if (logoutBtn) logoutBtn.onclick = () => AUTH.signOut();
 }
 
 // ============================================================
@@ -555,7 +626,7 @@ const overlay = () => $('#modal-overlay');
 function closeModal() { overlay().classList.add('hidden'); overlay().innerHTML = ''; }
 
 function openExpenseModal() {
-  let form = { desc: '', amount: '', cat: 'alimentacao', date: '', paidBy: MEMBERS[0].id, split: MEMBERS.map((m) => m.id) };
+  let form = { desc: '', amount: '', cat: 'alimentacao', date: '', paidBy: meId(), split: MEMBERS.map((m) => m.id) };
   function draw() {
     const catChips = Object.entries(CATEGORIES).map(([k,c]) => `<button class="chip ${form.cat===k?'on':''}" data-cat="${k}" style="${form.cat===k?`border-color:${c.color};background:${c.color}18;color:${c.color}`:''}">${svg(c.icon,14,form.cat===k?c.color:'currentColor')} ${c.label}</button>`).join('');
     const payChips = MEMBERS.map((m) => `<button class="chip pay ${form.paidBy===m.id?'on':''}" data-pay="${m.id}" style="${form.paidBy===m.id?`border-color:${C.blue};background:${C.blue}15;color:${C.blue}`:''}">${avatar(m.id,24)} ${m.name}</button>`).join('');
@@ -651,7 +722,7 @@ function openPostModal() {
     $('#m-save').onclick = () => {
       if (!form.text.trim()) return;
       const tags = form.tags.split(/[\s,]+/).filter(Boolean).map((t) => t.startsWith('#')?t:'#'+t);
-      const post = { id: Date.now(), author: MEMBERS[0].id, trip: TRIP.name, time: 'agora', text: form.text.trim(), grad: form.grad, likes: 0, comments: 0, tags };
+      const post = { id: Date.now(), author: meId(), trip: TRIP.name, time: 'agora', text: form.text.trim(), grad: form.grad, likes: 0, comments: 0, tags };
       POSTS.unshift(post);
       SYNC.save('Memorias', post);
       closeModal(); render();
@@ -686,17 +757,72 @@ function init() {
   $('#config-btn').innerHTML = svg('settings',17);
   $('#config-btn').onclick = () => { current = 'sync'; window.scrollTo(0,0); render(); };
 
+  // splash → depois decide entre login e app
+  const splash = $('#splash');
+  setTimeout(() => splash.classList.add('leaving'), 2000);
+  setTimeout(() => {
+    splash.classList.add('gone');
+    if (AUTH.user) enterApp();
+    else showLogin();
+  }, 2500);
+}
+
+// Mostra a tela de login (com o botão do Google)
+function showLogin() {
+  $('.app').style.display = 'none';
+  $('.nav').style.display = 'none';
+  $('#fab').style.display = 'none';
+  const el = $('#login');
+  el.style.display = 'flex';
+
+  if (!AUTH.configured()) {
+    // Sem Client ID configurado: modo de demonstração
+    $('#login-google').innerHTML = '<div class="login-warn">Login do Google ainda não configurado.<br>Veja INSTALACAO.md → “Login Google”.</div>';
+    $('#login-demo').style.display = 'block';
+    $('#login-demo').onclick = () => {
+      AUTH.user = { id: 'demo', name: 'Convidado', fullName: 'Convidado', email: '', picture: '', initials: 'CO', color: '#1E5AA8' };
+      if (!MEMBERS.find((m) => m.id === 'demo')) MEMBERS.unshift({ id: 'demo', name: 'Convidado', initials: 'CO', color: '#1E5AA8', admin: true, canExpense: true });
+      enterApp();
+    };
+    return;
+  }
+
+  // Carrega a biblioteca do Google e desenha o botão
+  const boot = () => {
+    google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: AUTH.handleCredential });
+    google.accounts.id.renderButton($('#login-google'), { theme: 'filled_blue', size: 'large', shape: 'pill', text: 'signin_with', locale: 'pt-BR' });
+    google.accounts.id.prompt(); // tenta login automático (One Tap)
+  };
+  if (window.google && google.accounts) boot();
+  else {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true; s.defer = true;
+    s.onload = boot;
+    document.head.appendChild(s);
+  }
+}
+
+// Entra no app depois de logado
+function enterApp() {
+  $('#login').style.display = 'none';
+  $('.app').style.display = '';
+  $('.nav').style.display = '';
+
+  // avatar do usuário no topo
+  const u = AUTH.user;
+  if (u) {
+    const av = u.picture
+      ? `<img src="${u.picture}" alt="${esc(u.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+      : u.initials;
+    $('#user-btn').innerHTML = `<div class="avatar" style="width:30px;height:30px;background:${u.color};font-size:11px;overflow:hidden">${av}</div>`;
+    $('#user-btn').onclick = () => { current = 'sync'; window.scrollTo(0,0); render(); };
+  }
+
   render();
 
   // Se já houver planilha conectada, puxa os dados ao abrir
-  if (SYNC.url) {
-    SYNC.load().then((ok) => { if (ok) render(); });
-  }
-
-  // splash
-  const splash = $('#splash');
-  setTimeout(() => splash.classList.add('leaving'), 2000);
-  setTimeout(() => splash.classList.add('gone'), 2500);
+  if (SYNC.url) SYNC.load().then((ok) => { if (ok) render(); });
 }
 
 document.addEventListener('DOMContentLoaded', init);
