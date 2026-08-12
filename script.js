@@ -1,8 +1,8 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
-   Versão: 2026-08-12-l (registro no login)
+   Versão: 2026-08-12-m (admin só p/ admin)
    ============================================================ */
-console.log('%cStigmés script versão 2026-08-12-l', 'color:#1E5AA8;font-weight:bold');
+console.log('%cStigmés script versão 2026-08-12-m', 'color:#1E5AA8;font-weight:bold');
 
 
 /* ---- Login com Google (Google Identity Services) ---- */
@@ -355,6 +355,7 @@ const GRADS = [
 const $ = (sel) => document.querySelector(sel);
 const member = (id) => MEMBERS.find((m) => m.id === id) || PENDING.find((m) => m.id === id) || { id, name: 'Usuário', initials: '??', color: '#1E5AA8' };
 const meId = () => (AUTH.user ? AUTH.user.id : null);
+const meIsAdmin = () => { const m = MEMBERS.find((x) => x.id === meId()); return !!(m && m.admin); };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
 function daysUntil(date) {
@@ -776,6 +777,8 @@ function render() {
   // Telas que exigem uma viagem aberta; sem TRIP, cai na lista
   const needsTrip = ['home','budget','itinerary','memories','admin'];
   if (!TRIP && needsTrip.includes(current)) current = 'trips';
+  // Tela admin é só para administradores da viagem
+  if (current === 'admin' && !meIsAdmin()) current = 'home';
 
   $('#content').innerHTML = SCREENS[current]();
   // FAB
@@ -787,6 +790,9 @@ function render() {
   else { fab.style.display = 'none'; }
   // barra de navegação: escondida na lista de viagens (não há viagem aberta)
   $('.nav').style.display = (current === 'trips' && !TRIP) ? 'none' : '';
+  // botão Admin só aparece para administradores da viagem
+  const adminBtn = document.querySelector('.nav button[data-nav="admin"]');
+  if (adminBtn) adminBtn.style.display = (TRIP && meIsAdmin()) ? '' : 'none';
   document.querySelectorAll('.nav button').forEach((b) => b.classList.toggle('active', b.dataset.nav === current));
   bindScreenEvents();
 }
