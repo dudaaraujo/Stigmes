@@ -1,8 +1,8 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
-   Versão: 2026-08-12-n (trava admin + salva viagem)
    ============================================================ */
-console.log('%cStigmés script versão 2026-08-12-n', 'color:#1E5AA8;font-weight:bold');
+const APP_VERSION = '2026-08-12-o';
+console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
 /* ---- Login com Google (Google Identity Services) ---- */
@@ -186,7 +186,7 @@ function rebuildItinerary(rows) {
   rows.forEach((r) => {
     const d = Number(r.day) || 1;
     if (!byDay[d]) byDay[d] = { day: d, date: r.date || '', city: r.city || '', items: [] };
-    byDay[d].items.push({ id: r.id, time: fmtTime(r.time), name: r.name || '', place: r.place || '', cost: Number(r.cost) || 0, cat: r.cat || 'passeios' });
+    byDay[d].items.push({ id: r.id, time: fmtTime(r.time), name: r.name || '', place: r.place || '', cost: Number(r.cost) || 0, cat: r.cat || 'passeios', criadoPor: r.criadoPor || '' });
   });
   return Object.values(byDay).sort((a, b) => a.day - b.day)
     .map((d) => ({ ...d, items: d.items.sort((a, b) => String(a.time).localeCompare(String(b.time))) }));
@@ -356,6 +356,8 @@ const $ = (sel) => document.querySelector(sel);
 const member = (id) => MEMBERS.find((m) => m.id === id) || PENDING.find((m) => m.id === id) || { id, name: 'Usuário', initials: '??', color: '#1E5AA8' };
 const meId = () => (AUTH.user ? AUTH.user.id : null);
 const meIsAdmin = () => { const m = MEMBERS.find((x) => x.id === meId()); return !!(m && m.admin); };
+// Pode editar/excluir um item se for o criador dele OU se for admin da viagem
+const podeEditar = (criadoPor) => meIsAdmin() || (criadoPor && String(criadoPor) === String(meId()));
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
 function daysUntil(date) {
@@ -499,7 +501,8 @@ function renderBudget() {
 
   const gastos = EXPENSES.map((e) => {
     const cat = CATEGORIES[e.cat];
-    return `<div class="expense expense-clickable" data-edit-expense="${esc(String(e.id))}">
+    const editavel = podeEditar(e.criadoPor);
+    return `<div class="expense${editavel?' expense-clickable':''}"${editavel?` data-edit-expense="${esc(String(e.id))}"`:''}>
       <div class="ico" style="background:${cat.color}18">${svg(cat.icon,18,cat.color)}</div>
       <div class="info"><div class="desc">${esc(e.desc)}</div><div class="meta">${esc(e.date)} · pago por ${member(e.paidBy).name} · ÷${e.split.length}</div></div>
       <div class="amt serif">${TRIP.currency}${e.amount}</div>
@@ -605,9 +608,10 @@ function renderItinerary() {
     const isOpen = dayOpen[d.day] || !!q;
     const items = d.items.map((it) => {
       const cat = CATEGORIES[it.cat];
+      const editavel = podeEditar(it.criadoPor);
       return `<div class="tl-item">
         <div class="tl-dot" style="background:${cat.color}"></div>
-        <div class="tl-card tl-clickable" data-edit-day="${d.day}" data-edit-id="${esc(String(it.id))}"><div class="tl-time serif">${it.time}</div><div style="flex:1"><div class="tl-name">${esc(it.name)}</div><div class="tl-place">${esc(it.place)}</div></div>${it.cost>0?`<div class="tl-cost">${TRIP.currency}${it.cost}</div>`:''}</div>
+        <div class="tl-card${editavel?' tl-clickable':''}"${editavel?` data-edit-day="${d.day}" data-edit-id="${esc(String(it.id))}"`:''}><div class="tl-time serif">${it.time}</div><div style="flex:1"><div class="tl-name">${esc(it.name)}</div><div class="tl-place">${esc(it.place)}</div></div>${it.cost>0?`<div class="tl-cost">${TRIP.currency}${it.cost}</div>`:''}</div>
       </div>`;
     }).join('');
     return `<div class="day">
@@ -764,7 +768,8 @@ function renderSync() {
         <li>Copie a URL e cole aqui em cima.</li>
       </ol>
       <div style="font-size:12px;color:var(--sub);margin-top:12px">Os dados novos que você criar no app são enviados para a planilha. Use “Recarregar” para puxar o que está na planilha para o app.</div>
-    </div>`;
+    </div>
+    <div style="text-align:center;font-size:12px;color:var(--sub);margin:8px 0 4px">Stigmés · versão ${APP_VERSION}</div>`;
 }
 
 // ============================================================
@@ -1005,7 +1010,7 @@ function openExpenseModal(editExp) {
       }
 
       const date = form.date ? new Date(form.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}).replace('.','') : 'Hoje';
-      const novo = { id: Date.now(), tripId: TRIP.id, desc: form.desc.trim(), cat: form.cat, amount: +form.amount, paidBy: form.paidBy, split: form.split.slice(), date };
+      const novo = { id: Date.now(), tripId: TRIP.id, desc: form.desc.trim(), cat: form.cat, amount: +form.amount, paidBy: form.paidBy, split: form.split.slice(), date, criadoPor: meId() };
       EXPENSES.unshift(novo);
       SYNC.save('Despesas', novo);
       closeModal(); render();
@@ -1125,11 +1130,11 @@ function openActivityModal(editItem, editDay) {
       let day = ITINERARY.find((x) => x.day === dayNum);
       if (!day) { day = { day: dayNum, date: dayDate, city: dayCity, items: [] }; ITINERARY.push(day); ITINERARY.sort((a,b) => a.day - b.day); }
       const novoId = Date.now();
-      const item = { id: novoId, time: form.time, name: form.name.trim(), place: form.place.trim(), cost: +form.cost||0, cat: form.cat };
+      const item = { id: novoId, time: form.time, name: form.name.trim(), place: form.place.trim(), cost: +form.cost||0, cat: form.cat, criadoPor: meId() };
       day.items.push(item);
       day.items.sort((a,b) => a.time.localeCompare(b.time));
       dayOpen[day.day] = true;
-      SYNC.save('Roteiro', { id: novoId, tripId: TRIP.id, day: day.day, date: day.date, city: day.city, time: item.time, name: item.name, place: item.place, cost: item.cost, cat: item.cat });
+      SYNC.save('Roteiro', { id: novoId, tripId: TRIP.id, day: day.day, date: day.date, city: day.city, time: item.time, name: item.name, place: item.place, cost: item.cost, cat: item.cat, criadoPor: meId() });
       closeModal(); render();
     };
   }
