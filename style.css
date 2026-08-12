@@ -371,6 +371,7 @@ textarea.field { resize: vertical; font-family: inherit; }
   align-items: center !important; justify-content: center !important;
   gap: 10px; padding: 24px; text-align: center;
 }
+.login.screen-hidden { display: none !important; }
 .login > * { flex: 0 0 auto; max-width: 340px; width: auto; }
 .login-logo { width: 220px !important; height: auto; margin: 0 0 4px; }
 .login-tagline { color: #1E3A5F; opacity: .7; font-size: 14px; letter-spacing: 1px; margin: 0 0 20px; }
