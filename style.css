@@ -276,6 +276,10 @@ button { font-family: inherit; }
 .member-main .nm { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px; }
 .member-main .role { font-size: 11.5px; color: var(--sub); }
 .member-perms { display: flex; gap: 8px; margin-top: 10px; padding-left: 47px; }
+.member-budget { display:flex; align-items:center; justify-content:space-between; margin-top:10px; padding-left:47px; gap:10px; }
+.member-budget .lbl { font-size:12.5px; color:var(--sub); }
+.budget-input { width:110px; padding:7px 10px; border:1px solid var(--border); border-radius:8px; background:var(--card); color:var(--txt); font-size:14px; text-align:right; }
+.budget-input:focus { outline:none; border-color:var(--blue); }
 .pill {
   font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 20px; cursor: pointer;
   border: 1px solid var(--border); background: transparent; color: var(--sub);
