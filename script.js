@@ -40,12 +40,33 @@ const AUTH = {
       initials: (info.name || first).split(/\s+/).map((s) => s[0]).slice(0, 2).join('').toUpperCase(),
       color: '#1E5AA8',
     };
-    // Garante que o usuário logado existe na lista de participantes
-    if (!MEMBERS.find((m) => m.id === AUTH.user.id)) {
-      MEMBERS.unshift({ id: AUTH.user.id, name: AUTH.user.name, initials: AUTH.user.initials, color: AUTH.user.color, admin: true, canExpense: true });
-      if (SYNC.url) SYNC.save('Participantes', { id: AUTH.user.id, name: AUTH.user.name, initials: AUTH.user.initials, color: AUTH.user.color, admin: true, canExpense: true });
-    }
+    AUTH.ensureMember();
     enterApp();
+  },
+
+  // Garante que o usuário logado está: (1) na lista local, (2) na aba Usuarios,
+  // e (3) ligado à viagem atual na aba Participantes.
+  // Seguro para chamar várias vezes: cada envio só acontece uma vez.
+  ensureMember() {
+    const u = AUTH.user;
+    if (!u) return;
+    // (1) lista local da viagem
+    if (!MEMBERS.find((m) => m.id === u.id)) {
+      MEMBERS.unshift({ id: u.id, name: u.name, initials: u.initials, color: u.color, admin: true, canExpense: true });
+    }
+    if (!SYNC.url) return;
+    // (2) cadastro do usuário (uma vez por usuário)
+    const uKey = 'stigmes_user_saved_' + u.id;
+    if (!localStorage.getItem(uKey)) {
+      SYNC.save('Usuarios', { id: u.id, name: u.fullName || u.name, email: u.email || '', picture: u.picture || '', initials: u.initials, color: u.color })
+        .then((r) => { if (r && r.ok) localStorage.setItem(uKey, '1'); });
+    }
+    // (3) participação na viagem (uma vez por usuário+viagem)
+    const pKey = 'stigmes_part_saved_' + u.id + '_' + TRIP.id;
+    if (!localStorage.getItem(pKey)) {
+      SYNC.save('Participantes', { id: u.id + '_' + TRIP.id, tripId: TRIP.id, userId: u.id, papel: 'admin', canExpense: true, status: 'ativo' })
+        .then((r) => { if (r && r.ok) localStorage.setItem(pKey, '1'); });
+    }
   },
 
   signOut() {
@@ -70,8 +91,25 @@ const SYNC = {
     this.status = 'carregando';
     try {
       const data = await this.jsonp(this.url);
-      // Só substitui se a aba tiver conteúdo (evita zerar o app com planilha vazia)
-      if (data.Participantes && data.Participantes.length) MEMBERS = data.Participantes;
+      // Monta a lista de membros da viagem cruzando Usuarios × Participantes
+      if (data.Usuarios && data.Usuarios.length) {
+        const usersById = {};
+        data.Usuarios.forEach((u) => { usersById[u.id] = u; });
+        const parts = (data.Participantes || []).filter((p) => String(p.tripId) === TRIP.id);
+        if (parts.length) {
+          MEMBERS = parts.map((p) => {
+            const u = usersById[p.userId] || {};
+            return {
+              id: p.userId,
+              name: (u.name || 'Usuário').split(/\s+/)[0],
+              initials: u.initials || '??',
+              color: u.color || '#1E5AA8',
+              admin: String(p.papel) === 'admin',
+              canExpense: p.canExpense === true || p.canExpense === 'TRUE' || p.canExpense === 'sim',
+            };
+          });
+        }
+      }
       if (data.Despesas && data.Despesas.length) {
         EXPENSES = data.Despesas.map((e) => ({ ...e, amount: Number(e.amount) || 0 }));
       }
@@ -205,6 +243,7 @@ let PENDING = [
 ];
 
 const TRIP = {
+  id: 'trip_mochilao_europa',
   name: 'Mochilão Europa',
   destination: 'Braga → Paris → Milão',
   start: '2026-07-04', end: '2026-07-18',
@@ -588,7 +627,9 @@ function bindScreenEvents() {
     const p = PENDING.find((x) => x.id === b.dataset.approve);
     const novo = { id: p.id, name: p.name, initials: p.initials, color: p.color, admin: false, canExpense: false };
     MEMBERS.push(novo);
-    SYNC.save('Participantes', novo);
+    // Novo usuário + ligação com a viagem
+    SYNC.save('Usuarios', { id: p.id, name: p.name, email: '', picture: '', initials: p.initials, color: p.color });
+    SYNC.save('Participantes', { id: p.id + '_' + TRIP.id, tripId: TRIP.id, userId: p.id, papel: 'participante', canExpense: false, status: 'ativo' });
     PENDING = PENDING.filter((x) => x.id !== b.dataset.approve); render();
   });
   document.querySelectorAll('[data-reject]').forEach((b) => b.onclick = () => { PENDING = PENDING.filter((x) => x.id !== b.dataset.reject); render(); });
@@ -607,6 +648,8 @@ function bindScreenEvents() {
     SYNC.url = $('#sync-url').value.trim();
     syncSave.textContent = 'Conectando...';
     await SYNC.load();
+    // Agora que a planilha está conectada, garante o usuário logado nela
+    if (AUTH.user) AUTH.ensureMember();
     render();
   };
   const syncReload = $('#sync-reload');
