@@ -1,8 +1,8 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
-   Versão: 2026-08-12-m (admin só p/ admin)
+   Versão: 2026-08-12-n (trava admin + salva viagem)
    ============================================================ */
-console.log('%cStigmés script versão 2026-08-12-m', 'color:#1E5AA8;font-weight:bold');
+console.log('%cStigmés script versão 2026-08-12-n', 'color:#1E5AA8;font-weight:bold');
 
 
 /* ---- Login com Google (Google Identity Services) ---- */
@@ -834,7 +834,9 @@ function bindScreenEvents() {
   });
   // Likes
   document.querySelectorAll('[data-like]').forEach((b) => b.onclick = () => { const id = +b.dataset.like; liked[id] = !liked[id]; render(); });
-  // Admin actions
+  // Admin actions — só ligadas se o usuário logado for admin da viagem.
+  // Participante não altera nada, mesmo que a tela apareça por algum motivo.
+  if (meIsAdmin()) {
   const copyBtn = $('#copy-code');
   if (copyBtn) copyBtn.onclick = () => {
     const code = $('#invite-code') ? $('#invite-code').textContent : '';
@@ -869,8 +871,10 @@ function bindScreenEvents() {
   if (save) save.onclick = () => {
     TRIP.name = $('#adm-name').value; TRIP.destination = $('#adm-dest').value;
     TRIP.start = $('#adm-start').value; TRIP.end = $('#adm-end').value; TRIP.budget = +$('#adm-budget').value;
+    SYNC.update('Viagens', TRIP.id, { nome: TRIP.name, destino: TRIP.destination, inicio: TRIP.start, fim: TRIP.end, orcamento: TRIP.budget });
     save.textContent = 'Salvo ✓'; setTimeout(() => { save.textContent = 'Salvar alterações'; }, 1500);
   };
+  }
   // Sync screen
   const syncSave = $('#sync-save');
   if (syncSave) syncSave.onclick = async () => {
