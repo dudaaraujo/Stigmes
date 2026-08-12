@@ -47,16 +47,11 @@ const AUTH = {
   // Garante que o usuário logado está: (1) na lista local, (2) na aba Usuarios,
   // e (3) ligado à viagem atual na aba Participantes.
   // Seguro para chamar várias vezes: cada envio só acontece uma vez.
+  // Cadastra o usuário logado na aba Usuarios (não mexe em Participantes;
+  // isso acontece ao criar ou entrar numa viagem).
   ensureMember() {
     const u = AUTH.user;
-    if (!u) return;
-    // (1) lista local da viagem
-    if (!MEMBERS.find((m) => m.id === u.id)) {
-      MEMBERS.unshift({ id: u.id, name: u.name, initials: u.initials, color: u.color, admin: true, canExpense: true });
-    }
-    if (!SYNC.url) return;
-    // (2) cadastro do usuário — o Apps Script gera o id_usuario (contador) e a data.
-    //     Enviamos o google_id para ele reconhecer e não duplicar.
+    if (!u || !SYNC.url) return;
     const uKey = 'stigmes_user_saved_' + u.id;
     if (!localStorage.getItem(uKey)) {
       SYNC.save('Usuarios', {
@@ -67,13 +62,6 @@ const AUTH = {
         iniciais: u.initials,
         cor: u.color,
       }).then((r) => { if (r && r.ok) localStorage.setItem(uKey, '1'); });
-    }
-    // (3) participação na viagem (uma vez por usuário+viagem).
-    //     userId usa o google_id como referência estável.
-    const pKey = 'stigmes_part_saved_' + u.id + '_' + TRIP.id;
-    if (!localStorage.getItem(pKey)) {
-      SYNC.save('Participantes', { tripId: TRIP.id, userId: u.id, papel: 'admin', canExpense: true, status: 'ativo' })
-        .then((r) => { if (r && r.ok) localStorage.setItem(pKey, '1'); });
     }
   },
 
@@ -99,33 +87,19 @@ const SYNC = {
     this.status = 'carregando';
     try {
       const data = await this.jsonp(this.url);
-      // Monta a lista de membros da viagem cruzando Usuarios × Participantes.
-      // A ligação é pelo google_id (Participantes.userId === Usuarios.google_id).
-      if (data.Usuarios && data.Usuarios.length) {
-        const usersByGoogle = {};
-        data.Usuarios.forEach((u) => { if (u.google_id) usersByGoogle[u.google_id] = u; });
-        const parts = (data.Participantes || []).filter((p) => String(p.tripId) === TRIP.id);
-        if (parts.length) {
-          MEMBERS = parts.map((p) => {
-            const u = usersByGoogle[p.userId] || {};
-            return {
-              id: p.userId,
-              name: (u.nome || 'Usuário').split(/\s+/)[0],
-              initials: u.iniciais || '??',
-              color: u.cor || '#1E5AA8',
-              admin: String(p.papel) === 'admin',
-              canExpense: p.canExpense === true || p.canExpense === 'TRUE' || p.canExpense === 'sim',
-            };
-          });
-        }
-      }
-      if (data.Despesas && data.Despesas.length) {
-        EXPENSES = data.Despesas.map((e) => ({ ...e, amount: Number(e.amount) || 0 }));
-      }
-      if (data.Roteiro && data.Roteiro.length) ITINERARY = rebuildItinerary(data.Roteiro);
-      if (data.Memorias && data.Memorias.length) {
-        POSTS = data.Memorias.map((p) => ({ ...p, likes: Number(p.likes)||0, comments: Number(p.comments)||0 }));
-      }
+      ALL = data;
+      // Lista de viagens
+      TRIPS = (data.Viagens || []).map((v) => ({
+        id: String(v.id),
+        name: v.nome || 'Viagem',
+        destination: v.destino || '',
+        start: v.inicio || '', end: v.fim || '',
+        budget: Number(v.orcamento) || 0,
+        currency: v.moeda || '€',
+        criadaPor: v.criadaPor || '',
+      }));
+      // Se já havia uma viagem aberta, recarrega os dados dela
+      if (TRIP) openTrip(TRIP.id, false);
       this.status = 'ok';
       return true;
     } catch (err) {
@@ -188,6 +162,71 @@ function rebuildItinerary(rows) {
     .map((d) => ({ ...d, items: d.items.sort((a, b) => String(a.time).localeCompare(String(b.time))) }));
 }
 
+// Abre uma viagem: filtra membros, despesas, roteiro e memórias daquela viagem.
+// goToHome=true navega para o dashboard; false só recarrega os dados.
+function openTrip(tripId, goToHome) {
+  const t = TRIPS.find((x) => String(x.id) === String(tripId));
+  if (!t) return;
+  TRIP = t;
+  localStorage.setItem('stigmes_last_trip', String(t.id));
+  const data = ALL || {};
+
+  // Membros: cruza Usuarios × Participantes desta viagem
+  const usersByGoogle = {};
+  (data.Usuarios || []).forEach((u) => { if (u.google_id) usersByGoogle[u.google_id] = u; });
+  MEMBERS = (data.Participantes || [])
+    .filter((p) => String(p.tripId) === String(t.id) && String(p.status) !== 'pendente')
+    .map((p) => {
+      const u = usersByGoogle[p.userId] || {};
+      return {
+        id: p.userId,
+        name: (u.nome || 'Usuário').split(/\s+/)[0],
+        initials: u.iniciais || '??',
+        color: u.cor || '#1E5AA8',
+        admin: String(p.papel) === 'admin',
+        canExpense: p.canExpense === true || p.canExpense === 'TRUE' || p.canExpense === 'sim',
+      };
+    });
+
+  // Pendentes desta viagem
+  PENDING = (data.Participantes || [])
+    .filter((p) => String(p.tripId) === String(t.id) && String(p.status) === 'pendente')
+    .map((p) => {
+      const u = usersByGoogle[p.userId] || {};
+      return { id: p.userId, name: u.nome || 'Usuário', initials: u.iniciais || '??', color: u.cor || '#7B6CA8', kind: 'Pedido para entrar', time: '' };
+    });
+
+  // Despesas desta viagem
+  EXPENSES = (data.Despesas || [])
+    .filter((e) => String(e.tripId) === String(t.id))
+    .map((e) => ({ ...e, amount: Number(e.amount) || 0, split: Array.isArray(e.split) ? e.split : [] }));
+
+  // Roteiro desta viagem
+  ITINERARY = rebuildItinerary((data.Roteiro || []).filter((r) => String(r.tripId) === String(t.id)));
+
+  // Memórias desta viagem
+  POSTS = (data.Memorias || [])
+    .filter((p) => String(p.tripId) === String(t.id))
+    .map((p) => ({ ...p, likes: Number(p.likes) || 0, comments: Number(p.comments) || 0, tags: Array.isArray(p.tags) ? p.tags : [] }));
+
+  if (goToHome) { current = 'home'; window.scrollTo(0, 0); render(); }
+}
+
+// Fecha a viagem atual e volta para a lista
+function closeTrip() {
+  TRIP = null;
+  localStorage.removeItem('stigmes_last_trip');
+  current = 'trips';
+  window.scrollTo(0, 0);
+  render();
+}
+
+// Sou participante desta viagem?
+function amMember(tripId) {
+  const meG = AUTH.user && AUTH.user.id;
+  return (ALL && ALL.Participantes || []).some((p) => String(p.tripId) === String(tripId) && String(p.userId) === String(meG));
+}
+
 // ---- Ícones SVG (Feather-style) ----
 const ICON = {
   home: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
@@ -239,25 +278,15 @@ function svgFill(name, size, color) {
 const C = { blue: '#1E5AA8', gold: '#D4AF37', teal: '#2E8B8B', clay: '#B5654A' };
 
 // ---- Dados ----
-let MEMBERS = [
-  { id: 'hilda', name: 'Hilda', initials: 'HI', color: '#1E5AA8', admin: true, canExpense: true },
-  { id: 'ana', name: 'Ana', initials: 'AN', color: '#D4AF37', admin: false, canExpense: true },
-  { id: 'joao', name: 'João', initials: 'JO', color: '#2E8B8B', admin: false, canExpense: true },
-  { id: 'pedro', name: 'Pedro', initials: 'PE', color: '#B5654A', admin: false, canExpense: false },
-];
-
-let PENDING = [
-  { id: 'marina', name: 'Marina Costa', initials: 'MC', color: '#7B6CA8', kind: 'Pedido para entrar', time: '1h' },
-  { id: 'luis', name: 'Luís Tavares', initials: 'LT', color: '#2E8B8B', kind: 'Pedido para entrar', time: '3h' },
-];
-
-const TRIP = {
-  id: 'trip_mochilao_europa',
-  name: 'Mochilão Europa',
-  destination: 'Braga → Paris → Milão',
-  start: '2026-07-04', end: '2026-07-18',
-  budget: 6000, currency: '€',
-};
+// ---- Estado (tudo vazio; preenchido pela planilha) ----
+let TRIPS = [];        // todas as viagens (aba Viagens)
+let TRIP = null;       // viagem aberta no momento
+let MEMBERS = [];      // participantes da viagem aberta
+let PENDING = [];      // aprovações pendentes (por ora vazio)
+let EXPENSES = [];     // despesas da viagem aberta
+let ITINERARY = [];    // roteiro da viagem aberta
+let POSTS = [];        // memórias da viagem aberta
+let ALL = null;        // cópia bruta do que veio da planilha (para filtrar por viagem)
 
 const CATEGORIES = {
   transporte: { label: 'Transporte', icon: 'car', color: '#1E5AA8' },
@@ -267,29 +296,6 @@ const CATEGORIES = {
   outros: { label: 'Outros', icon: 'shopping', color: '#7B6CA8' },
 };
 
-let EXPENSES = [
-  { id: 1, desc: 'Hotel em Paris (3 noites)', cat: 'hospedagem', amount: 400, paidBy: 'hilda', split: ['hilda','ana','joao','pedro'], date: '08 Jul' },
-  { id: 2, desc: 'Voo Lisboa → Paris', cat: 'transporte', amount: 640, paidBy: 'ana', split: ['hilda','ana','joao','pedro'], date: '04 Jul' },
-  { id: 3, desc: 'Jantar Le Marais', cat: 'alimentacao', amount: 120, paidBy: 'joao', split: ['hilda','ana','joao','pedro'], date: '08 Jul' },
-  { id: 4, desc: 'Ingressos Louvre', cat: 'passeios', amount: 68, paidBy: 'pedro', split: ['hilda','ana','joao','pedro'], date: '09 Jul' },
-  { id: 5, desc: 'Cruzeiro no Sena', cat: 'passeios', amount: 96, paidBy: 'hilda', split: ['hilda','ana','joao','pedro'], date: '09 Jul' },
-  { id: 6, desc: 'Mercado + lanches', cat: 'alimentacao', amount: 54, paidBy: 'ana', split: ['ana','joao'], date: '10 Jul' },
-];
-
-let ITINERARY = [
-  { day: 1, date: '08 Jul', city: 'Paris', items: [
-    { time: '09:00', name: 'Museu do Louvre', place: 'Rue de Rivoli', cost: 17, cat: 'passeios' },
-    { time: '13:00', name: 'Almoço — Le Marais', place: 'Le Marais', cost: 30, cat: 'alimentacao' },
-    { time: '15:00', name: 'Torre Eiffel', place: 'Champ de Mars', cost: 29, cat: 'passeios' },
-    { time: '19:00', name: 'Cruzeiro no Sena', place: 'Port de la Bourdonnais', cost: 24, cat: 'passeios' },
-  ]},
-  { day: 2, date: '09 Jul', city: 'Paris', items: [
-    { time: '10:00', name: 'Montmartre & Sacré-Cœur', place: 'Montmartre', cost: 0, cat: 'passeios' },
-    { time: '13:30', name: 'Almoço no bairro', place: 'Pigalle', cost: 28, cat: 'alimentacao' },
-    { time: '16:00', name: 'Trem Paris → Milão', place: 'Gare de Lyon', cost: 89, cat: 'transporte' },
-  ]},
-];
-
 const GRADS = [
   'linear-gradient(135deg,#D4AF37,#B5654A)',
   'linear-gradient(135deg,#1E5AA8,#2E8B8B)',
@@ -297,15 +303,10 @@ const GRADS = [
   'linear-gradient(135deg,#2E8B8B,#5BAEC4)',
 ];
 
-let POSTS = [
-  { id: 1, author: 'ana', trip: 'Mochilão Europa', time: '2h', text: 'Pôr do sol na Torre Eiffel valeu cada degrau. Dica: suba a pé até o 2º andar, fila bem menor 🗼', grad: GRADS[0], likes: 12, comments: 3, tags: ['#Paris','#Europa'] },
-  { id: 2, author: 'joao', trip: 'Mochilão Europa', time: '5h', text: 'Café da manhã no mercado local antes do trem para Milão. A baguete daqui é outro nível.', grad: GRADS[1], likes: 8, comments: 1, tags: ['#RoadTrip'] },
-];
-
 // ---- Helpers ----
 const $ = (sel) => document.querySelector(sel);
-const member = (id) => MEMBERS.find((m) => m.id === id) || PENDING.find((m) => m.id === id);
-const meId = () => (AUTH.user && MEMBERS.find((m) => m.id === AUTH.user.id)) ? AUTH.user.id : MEMBERS[0].id;
+const member = (id) => MEMBERS.find((m) => m.id === id) || PENDING.find((m) => m.id === id) || { id, name: 'Usuário', initials: '??', color: '#1E5AA8' };
+const meId = () => (AUTH.user ? AUTH.user.id : null);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
 function daysUntil(date) {
@@ -348,13 +349,53 @@ function settle(net) {
 }
 
 // ============================================================
+// RENDER: Lista de viagens
+// ============================================================
+function renderTrips() {
+  const cards = TRIPS.map((t) => {
+    const sou = amMember(t.id);
+    const dias = t.start ? daysUntil(t.start) : null;
+    return `<div class="trip-card">
+      <div class="trip-cover"></div>
+      <div class="trip-body">
+        <div class="trip-name serif">${esc(t.name)}</div>
+        <div class="trip-dest">${t.destination ? svg('mappin',13) + ' ' + esc(t.destination) : ''}</div>
+        <div class="trip-meta">${dias !== null && dias > 0 ? `faltam ${dias} dias` : (t.start ? 'em andamento' : '')} ${t.budget ? '· ' + t.currency + Number(t.budget).toLocaleString('pt-BR') : ''}</div>
+        <div class="trip-actions">
+          ${sou
+            ? `<button class="trip-open" data-open="${esc(t.id)}">Abrir</button>`
+            : `<button class="trip-join" data-join="${esc(t.id)}">Participar</button>`}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const vazio = TRIPS.length === 0
+    ? `<div class="empty">Nenhuma viagem ainda.<br>Crie a primeira no botão +.</div>`
+    : '';
+
+  const semPlanilha = !SYNC.url
+    ? `<div class="card"><div style="font-size:13px;color:var(--sub)">Conecte sua planilha em Configurações (engrenagem no topo) para ver e salvar viagens.</div></div>`
+    : '';
+
+  return `
+    <div class="eyebrow">Suas viagens</div>
+    <h2 class="section-title serif">Para onde vamos?</h2>
+    ${semPlanilha}
+    <div class="trips-list">${cards}</div>
+    ${vazio}`;
+}
+
+// ============================================================
 // RENDER: Dashboard
 // ============================================================
 function renderDashboard() {
+  if (!TRIP) return renderTrips();
   const spent = EXPENSES.reduce((s,e) => s+e.amount, 0);
-  const pct = Math.round((spent / TRIP.budget) * 100);
+  const pct = TRIP.budget ? Math.round((spent / TRIP.budget) * 100) : 0;
   return `
     <div class="hero">
+      <button class="hero-back" id="hero-back">${svg('chevronright',18,'#fff')}<span>Trocar viagem</span></button>
       <div class="kicker">Sua próxima viagem</div>
       <h1 class="serif">${esc(TRIP.name)}</h1>
       <div class="dest">${svg('mappin',14)} ${esc(TRIP.destination)}</div>
@@ -363,21 +404,37 @@ function renderDashboard() {
     </div>
     <div class="grid2">
       <div class="card stat">${svg('users')}<div class="val serif">${MEMBERS.length}</div><div class="lbl">Participantes</div></div>
-      <div class="card stat">${svg('mappin')}<div class="val serif">3</div><div class="lbl">Cidades</div></div>
+      <div class="card stat">${svg('mappin')}<div class="val serif">${countCities()}</div><div class="lbl">Cidades</div></div>
     </div>
     <div class="card" style="margin-top:12px">
       <div class="row-between"><span style="font-size:13px;color:var(--sub)">Orçamento consumido</span><span style="font-weight:700;color:${pct>80?C.gold:C.blue}">${pct}%</span></div>
       <div class="track"><div class="fill" style="width:${Math.min(pct,100)}%"></div></div>
-      <div class="row-between" style="margin-top:10px;font-size:13px"><span>Gasto <b>${TRIP.currency}${spent}</b></span><span style="color:var(--sub)">de ${TRIP.currency}${TRIP.budget}</span></div>
+      <div class="row-between" style="margin-top:10px;font-size:13px"><span>Gasto <b>${TRIP.currency}${spent}</b></span><span style="color:var(--sub)">de ${TRIP.currency}${TRIP.budget||0}</span></div>
     </div>
-    <div class="card" style="margin-top:12px">
-      <div class="mini-label">Próxima atividade</div>
-      <div class="next-row">
-        <div class="next-ico">${svg('ticket',20)}</div>
-        <div style="flex:1"><div style="font-weight:600">Museu do Louvre</div><div style="font-size:12px;color:var(--sub)">08 Jul · 09:00 · Rue de Rivoli</div></div>
-        ${svg('chevronright',18,'var(--sub)')}
-      </div>
-    </div>`;
+    ${nextActivityCard()}`;
+}
+
+function countCities() {
+  const set = {};
+  ITINERARY.forEach((d) => { if (d.city) set[d.city] = 1; });
+  return Object.keys(set).length;
+}
+
+function nextActivityCard() {
+  // primeira atividade do primeiro dia com itens
+  for (const d of ITINERARY) {
+    if (d.items && d.items.length) {
+      const it = d.items[0];
+      return `<div class="card" style="margin-top:12px">
+        <div class="mini-label">Próxima atividade</div>
+        <div class="next-row">
+          <div class="next-ico">${svg('ticket',20)}</div>
+          <div style="flex:1"><div style="font-weight:600">${esc(it.name)}</div><div style="font-size:12px;color:var(--sub)">${esc(d.date)} · ${esc(it.time)} · ${esc(it.place)}</div></div>
+        </div>
+      </div>`;
+    }
+  }
+  return `<div class="card" style="margin-top:12px"><div class="mini-label">Próxima atividade</div><div style="font-size:13px;color:var(--sub);margin-top:8px">Nenhuma atividade no roteiro ainda.</div></div>`;
 }
 
 // ============================================================
@@ -605,23 +662,42 @@ function renderSync() {
 // ============================================================
 // Navegação e re-render
 // ============================================================
-const SCREENS = { home: renderDashboard, budget: renderBudget, itinerary: renderItinerary, memories: renderMemories, admin: renderAdmin, sync: renderSync };
-let current = 'home';
+const SCREENS = { trips: renderTrips, home: renderDashboard, budget: renderBudget, itinerary: renderItinerary, memories: renderMemories, admin: renderAdmin, sync: renderSync };
+let current = 'trips';
 
 function render() {
+  // Telas que exigem uma viagem aberta; sem TRIP, cai na lista
+  const needsTrip = ['home','budget','itinerary','memories','admin'];
+  if (!TRIP && needsTrip.includes(current)) current = 'trips';
+
   $('#content').innerHTML = SCREENS[current]();
   // FAB
   const fab = $('#fab');
-  if (current === 'budget') { fab.style.display = 'flex'; fab.setAttribute('aria-label','Adicionar despesa'); fab.dataset.action = 'expense'; }
-  else if (current === 'itinerary') { fab.style.display = 'flex'; fab.setAttribute('aria-label','Adicionar atividade'); fab.dataset.action = 'activity'; }
-  else if (current === 'memories') { fab.style.display = 'flex'; fab.setAttribute('aria-label','Nova publicação'); fab.dataset.action = 'post'; }
+  if (current === 'trips') { fab.style.display = 'flex'; fab.setAttribute('aria-label','Nova viagem'); fab.dataset.action = 'trip'; }
+  else if (current === 'budget' && TRIP) { fab.style.display = 'flex'; fab.setAttribute('aria-label','Adicionar despesa'); fab.dataset.action = 'expense'; }
+  else if (current === 'itinerary' && TRIP) { fab.style.display = 'flex'; fab.setAttribute('aria-label','Adicionar atividade'); fab.dataset.action = 'activity'; }
+  else if (current === 'memories' && TRIP) { fab.style.display = 'flex'; fab.setAttribute('aria-label','Nova publicação'); fab.dataset.action = 'post'; }
   else { fab.style.display = 'none'; }
-  // nav active
+  // barra de navegação: escondida na lista de viagens (não há viagem aberta)
+  $('.nav').style.display = (current === 'trips' && !TRIP) ? 'none' : '';
   document.querySelectorAll('.nav button').forEach((b) => b.classList.toggle('active', b.dataset.nav === current));
   bindScreenEvents();
 }
 
 function bindScreenEvents() {
+  // Lista de viagens
+  document.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => openTrip(b.dataset.open, true));
+  document.querySelectorAll('[data-join]').forEach((b) => b.onclick = async () => {
+    const tripId = b.dataset.join;
+    b.textContent = 'Entrando...';
+    if (AUTH.user) {
+      await SYNC.save('Participantes', { tripId: tripId, userId: AUTH.user.id, papel: 'participante', canExpense: true, status: 'ativo' });
+      await SYNC.load();
+    }
+    openTrip(tripId, true);
+  });
+  const heroBack = $('#hero-back');
+  if (heroBack) heroBack.onclick = () => closeTrip();
   // Budget tabs
   document.querySelectorAll('[data-btab]').forEach((b) => b.onclick = () => { budgetTab = b.dataset.btab; render(); });
   // Itinerary search
@@ -719,7 +795,7 @@ function openExpenseModal() {
     $('#m-save').onclick = () => {
       if (!(form.desc.trim() && +form.amount && form.split.length)) return;
       const date = form.date ? new Date(form.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}).replace('.','') : 'Hoje';
-      const novo = { id: Date.now(), desc: form.desc.trim(), cat: form.cat, amount: +form.amount, paidBy: form.paidBy, split: form.split.slice(), date };
+      const novo = { id: Date.now(), tripId: TRIP.id, desc: form.desc.trim(), cat: form.cat, amount: +form.amount, paidBy: form.paidBy, split: form.split.slice(), date };
       EXPENSES.unshift(novo);
       SYNC.save('Despesas', novo);
       closeModal(); render();
@@ -759,7 +835,7 @@ function openActivityModal() {
       day.items.push(item);
       day.items.sort((a,b) => a.time.localeCompare(b.time));
       dayOpen[day.day] = true;
-      SYNC.save('Roteiro', { id: Date.now(), day: day.day, date: day.date, city: day.city, time: item.time, name: item.name, place: item.place, cost: item.cost, cat: item.cat });
+      SYNC.save('Roteiro', { id: Date.now(), tripId: TRIP.id, day: day.day, date: day.date, city: day.city, time: item.time, name: item.name, place: item.place, cost: item.cost, cat: item.cat });
       closeModal(); render();
     };
   }
@@ -786,13 +862,60 @@ function openPostModal() {
     $('#m-save').onclick = () => {
       if (!form.text.trim()) return;
       const tags = form.tags.split(/[\s,]+/).filter(Boolean).map((t) => t.startsWith('#')?t:'#'+t);
-      const post = { id: Date.now(), author: meId(), trip: TRIP.name, time: 'agora', text: form.text.trim(), grad: form.grad, likes: 0, comments: 0, tags };
+      const post = { id: Date.now(), tripId: TRIP.id, author: meId(), time: 'agora', text: form.text.trim(), grad: form.grad, likes: 0, comments: 0, tags };
       POSTS.unshift(post);
       SYNC.save('Memorias', post);
       closeModal(); render();
     };
   }
   draw();
+}
+
+// Modal: criar nova viagem
+function openTripModal() {
+  let form = { nome: '', destino: '', inicio: '', fim: '', orcamento: '', moeda: '€' };
+  overlay().innerHTML = `<div class="modal">
+    <div class="modal-grab"></div>
+    <div class="modal-head"><h3 class="serif">Nova viagem</h3><button id="m-close">${svg('x',20)}</button></div>
+    <div class="field-label">Nome da viagem</div><input class="field" id="t-nome" placeholder="Ex.: Mochilão Europa">
+    <div class="field-label mt14">Destino</div><input class="field" id="t-destino" placeholder="Ex.: Braga → Paris → Milão">
+    <div class="two-col"><div><div class="field-label mt14">Início</div><input class="field" id="t-inicio" type="date"></div><div><div class="field-label mt14">Término</div><input class="field" id="t-fim" type="date"></div></div>
+    <div class="two-col"><div><div class="field-label mt14">Orçamento</div><input class="field" id="t-orc" type="number" placeholder="0"></div><div><div class="field-label mt14">Moeda</div><input class="field" id="t-moeda" value="€"></div></div>
+    <button class="primary-btn" id="m-save" disabled>Criar viagem</button>
+  </div>`;
+  overlay().classList.remove('hidden');
+  $('#m-close').onclick = closeModal;
+  const check = () => { $('#m-save').disabled = !$('#t-nome').value.trim(); };
+  $('#t-nome').oninput = check;
+  $('#m-save').onclick = async () => {
+    const nome = $('#t-nome').value.trim();
+    if (!nome) return;
+    $('#m-save').textContent = 'Criando...';
+    const row = {
+      nome,
+      destino: $('#t-destino').value.trim(),
+      inicio: $('#t-inicio').value,
+      fim: $('#t-fim').value,
+      orcamento: Number($('#t-orc').value) || 0,
+      moeda: $('#t-moeda').value.trim() || '€',
+      criadaPor: AUTH.user ? AUTH.user.id : '',
+    };
+    await SYNC.save('Viagens', row);
+    // recarrega para pegar a viagem recém-criada (com o id gerado pelo script)
+    await SYNC.load();
+    closeModal();
+    // abre a viagem mais recente criada por mim com esse nome
+    const minha = TRIPS.filter((t) => t.name === nome);
+    const nova = minha.length ? minha[minha.length - 1] : null;
+    if (nova) {
+      // já entra como participante/admin
+      await SYNC.save('Participantes', { tripId: nova.id, userId: AUTH.user.id, papel: 'admin', canExpense: true, status: 'ativo' });
+      await SYNC.load();
+      openTrip(nova.id, true);
+    } else {
+      current = 'trips'; render();
+    }
+  };
 }
 
 // ============================================================
@@ -807,6 +930,7 @@ function init() {
     if (a === 'expense') openExpenseModal();
     else if (a === 'activity') openActivityModal();
     else if (a === 'post') openPostModal();
+    else if (a === 'trip') openTripModal();
   };
   // overlay click closes
   overlay().onclick = (e) => { if (e.target === overlay()) closeModal(); };
@@ -919,10 +1043,22 @@ function enterApp() {
     $('#user-btn').onclick = () => { current = 'sync'; window.scrollTo(0,0); render(); };
   }
 
+  current = 'trips';
+  TRIP = null;
   render();
 
-  // Se já houver planilha conectada, puxa os dados ao abrir
-  if (SYNC.url) SYNC.load().then((ok) => { if (ok) render(); });
+  // Se já houver planilha conectada, puxa dados, cadastra o usuário e mostra as viagens
+  if (SYNC.url) {
+    SYNC.load().then((ok) => {
+      if (ok) {
+        AUTH.ensureMember();
+        // reabre a última viagem, se ainda existir
+        const last = localStorage.getItem('stigmes_last_trip');
+        if (last && TRIPS.find((t) => String(t.id) === String(last))) openTrip(last, true);
+        else render();
+      }
+    });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
