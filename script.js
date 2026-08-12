@@ -1,6 +1,9 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
+   Versão: 2026-08-12-b (modal sem piscar)
    ============================================================ */
+console.log('%cStigmés script versão 2026-08-12-b', 'color:#1E5AA8;font-weight:bold');
+
 
 /* ---- Login com Google (Google Identity Services) ---- */
 // Cole aqui o seu Client ID (ver INSTALACAO.md → seção Login Google).
@@ -151,12 +154,33 @@ const SYNC = {
 };
 
 // Reconstrói a estrutura de ITINERARY (dias com items) a partir das linhas planas da planilha
+// Normaliza horário para "HH:MM".
+// O Sheets às vezes converte "17:51" em data ISO (1899-12-30T17:51:...Z);
+// esta função extrai só a hora, seja qual for o formato recebido.
+function fmtTime(v) {
+  if (v === null || v === undefined) return '';
+  const s = String(v).trim();
+  if (!s) return '';
+  // formato ISO com T (ex.: 1899-12-30T17:51:45.000Z)
+  const iso = s.match(/T(\d{2}):(\d{2})/);
+  if (iso) return iso[1] + ':' + iso[2];
+  // "17:51" ou "17:51:45" → pega HH:MM
+  const hm = s.match(/^(\d{1,2}):(\d{2})/);
+  if (hm) return hm[1].padStart(2, '0') + ':' + hm[2];
+  // objeto Date serializado de outra forma: tenta interpretar
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+  }
+  return s;
+}
+
 function rebuildItinerary(rows) {
   const byDay = {};
   rows.forEach((r) => {
     const d = Number(r.day) || 1;
     if (!byDay[d]) byDay[d] = { day: d, date: r.date || '', city: r.city || '', items: [] };
-    byDay[d].items.push({ time: r.time || '', name: r.name || '', place: r.place || '', cost: Number(r.cost) || 0, cat: r.cat || 'passeios' });
+    byDay[d].items.push({ time: fmtTime(r.time), name: r.name || '', place: r.place || '', cost: Number(r.cost) || 0, cat: r.cat || 'passeios' });
   });
   return Object.values(byDay).sort((a, b) => a.day - b.day)
     .map((d) => ({ ...d, items: d.items.sort((a, b) => String(a.time).localeCompare(String(b.time))) }));
