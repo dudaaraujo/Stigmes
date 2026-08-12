@@ -12,8 +12,7 @@ const SYNC = {
     if (!this.url) return false;
     this.status = 'carregando';
     try {
-      const res = await fetch(this.url, { method: 'GET' });
-      const data = await res.json();
+      const data = await this.jsonp(this.url);
       // Só substitui se a aba tiver conteúdo (evita zerar o app com planilha vazia)
       if (data.Participantes && data.Participantes.length) MEMBERS = data.Participantes;
       if (data.Despesas && data.Despesas.length) {
@@ -32,6 +31,28 @@ const SYNC = {
     }
   },
 
+  // Leitura via JSONP: contorna o bloqueio de CORS que o fetch sofre
+  // ao ler respostas do Apps Script (que redireciona para outro domínio).
+  jsonp(url, timeoutMs = 15000) {
+    return new Promise((resolve, reject) => {
+      const cb = 'stigmes_cb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
+      const sep = url.includes('?') ? '&' : '?';
+      const script = document.createElement('script');
+      let done = false;
+      const cleanup = () => {
+        done = true;
+        delete window[cb];
+        if (script.parentNode) script.parentNode.removeChild(script);
+        clearTimeout(timer);
+      };
+      const timer = setTimeout(() => { if (!done) { cleanup(); reject(new Error('Tempo esgotado')); } }, timeoutMs);
+      window[cb] = (data) => { if (!done) { cleanup(); resolve(data); } };
+      script.onerror = () => { if (!done) { cleanup(); reject(new Error('Falha ao carregar')); } };
+      script.src = url + sep + 'callback=' + cb;
+      document.body.appendChild(script);
+    });
+  },
+
   // Salva uma linha. Usa "no-cors" como fallback: o Apps Script recebe,
   // mas o navegador não lê a resposta — por isso atualizamos o app localmente também.
   async save(sheet, row) {
@@ -39,7 +60,8 @@ const SYNC = {
     try {
       await fetch(this.url, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita preflight CORS
+        mode: 'no-cors', // envia sem exigir leitura da resposta (evita bloqueio CORS)
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita preflight
         body: JSON.stringify({ sheet, row }),
       });
       return { ok: true };
