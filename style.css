@@ -363,6 +363,28 @@ textarea.field { resize: vertical; font-family: inherit; }
 
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
+/* ---- Lista de viagens ---- */
+.trips-list { display: flex; flex-direction: column; gap: 14px; }
+.trip-card { background: var(--card); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; }
+.trip-cover { height: 90px; background: linear-gradient(135deg,#143C6E,#1E5AA8 55%,#2E8B8B); }
+.trip-body { padding: 14px; }
+.trip-name { font-size: 19px; }
+.trip-dest { font-size: 13px; color: var(--sub); display: flex; align-items: center; gap: 5px; margin-top: 3px; }
+.trip-meta { font-size: 12px; color: var(--sub); margin-top: 6px; }
+.trip-actions { margin-top: 12px; }
+.trip-open, .trip-join {
+  border: none; border-radius: 10px; padding: 10px 18px; font-size: 13px; font-weight: 600;
+  cursor: pointer; color: #fff;
+}
+.trip-open { background: var(--blue); }
+.trip-join { background: var(--teal); }
+.hero-back {
+  display: inline-flex; align-items: center; gap: 4px; background: rgba(255,255,255,.15);
+  border: none; color: #fff; font-size: 12px; font-weight: 600; padding: 6px 12px 6px 8px;
+  border-radius: 20px; cursor: pointer; margin-bottom: 12px;
+}
+.hero-back svg { transform: rotate(180deg); }
+
 /* ---- Login ---- */
 .login {
   position: fixed; inset: 0; z-index: 90;
