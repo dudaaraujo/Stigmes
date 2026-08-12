@@ -2,6 +2,66 @@
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
 
+/* ---- Sincronização com Google Sheets (via Apps Script) ---- */
+const SYNC = {
+  get url() { return localStorage.getItem('stigmes_sheet_url') || ''; },
+  set url(v) { localStorage.setItem('stigmes_sheet_url', v || ''); },
+  status: 'off', // off | ok | erro | ...
+
+  async load() {
+    if (!this.url) return false;
+    this.status = 'carregando';
+    try {
+      const res = await fetch(this.url, { method: 'GET' });
+      const data = await res.json();
+      // Só substitui se a aba tiver conteúdo (evita zerar o app com planilha vazia)
+      if (data.Participantes && data.Participantes.length) MEMBERS = data.Participantes;
+      if (data.Despesas && data.Despesas.length) {
+        EXPENSES = data.Despesas.map((e) => ({ ...e, amount: Number(e.amount) || 0 }));
+      }
+      if (data.Roteiro && data.Roteiro.length) ITINERARY = rebuildItinerary(data.Roteiro);
+      if (data.Memorias && data.Memorias.length) {
+        POSTS = data.Memorias.map((p) => ({ ...p, likes: Number(p.likes)||0, comments: Number(p.comments)||0 }));
+      }
+      this.status = 'ok';
+      return true;
+    } catch (err) {
+      this.status = 'erro';
+      console.error('Falha ao ler planilha:', err);
+      return false;
+    }
+  },
+
+  // Salva uma linha. Usa "no-cors" como fallback: o Apps Script recebe,
+  // mas o navegador não lê a resposta — por isso atualizamos o app localmente também.
+  async save(sheet, row) {
+    if (!this.url) return { ok: false, offline: true };
+    try {
+      await fetch(this.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita preflight CORS
+        body: JSON.stringify({ sheet, row }),
+      });
+      return { ok: true };
+    } catch (err) {
+      console.error('Falha ao salvar na planilha:', err);
+      return { ok: false, error: String(err) };
+    }
+  },
+};
+
+// Reconstrói a estrutura de ITINERARY (dias com items) a partir das linhas planas da planilha
+function rebuildItinerary(rows) {
+  const byDay = {};
+  rows.forEach((r) => {
+    const d = Number(r.day) || 1;
+    if (!byDay[d]) byDay[d] = { day: d, date: r.date || '', city: r.city || '', items: [] };
+    byDay[d].items.push({ time: r.time || '', name: r.name || '', place: r.place || '', cost: Number(r.cost) || 0, cat: r.cat || 'passeios' });
+  });
+  return Object.values(byDay).sort((a, b) => a.day - b.day)
+    .map((d) => ({ ...d, items: d.items.sort((a, b) => String(a.time).localeCompare(String(b.time))) }));
+}
+
 // ---- Ícones SVG (Feather-style) ----
 const ICON = {
   home: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
@@ -368,9 +428,44 @@ function renderAdmin() {
 }
 
 // ============================================================
+// RENDER: Sincronização (Google Sheets)
+// ============================================================
+function renderSync() {
+  const url = SYNC.url;
+  const statusMap = {
+    off: { txt: 'Não conectado', color: 'var(--sub)' },
+    carregando: { txt: 'Carregando...', color: C.gold },
+    ok: { txt: 'Conectado ✓', color: C.teal },
+    erro: { txt: 'Erro ao conectar', color: C.clay },
+  };
+  const st = statusMap[SYNC.status] || statusMap.off;
+  return `
+    <div class="eyebrow">Integração</div>
+    <h2 class="section-title serif">Planilha Google</h2>
+    <div class="card">
+      <div class="row-between"><span style="font-size:13px;color:var(--sub)">Status</span><span style="font-weight:700;color:${st.color}">${st.txt}</span></div>
+      <div class="field-label mt14">Link do app da planilha (Apps Script)</div>
+      <input class="field" id="sync-url" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(url)}">
+      <button class="primary-btn" id="sync-save">Salvar e conectar</button>
+      <button class="primary-btn" id="sync-reload" style="background:var(--teal);margin-top:10px" ${url?'':'disabled'}>Recarregar dados da planilha</button>
+    </div>
+    <div class="card">
+      <div class="mini-label" style="margin-bottom:10px">Como conectar</div>
+      <ol style="margin:0;padding-left:18px;font-size:13px;line-height:1.7;color:var(--text)">
+        <li>Crie uma planilha no Google Sheets.</li>
+        <li>Menu <b>Extensões → Apps Script</b>.</li>
+        <li>Cole o código do arquivo <b>apps-script.gs</b>.</li>
+        <li><b>Implantar → Nova implantação → App da Web</b>. Acesso: <b>Qualquer pessoa</b>.</li>
+        <li>Copie a URL e cole aqui em cima.</li>
+      </ol>
+      <div style="font-size:12px;color:var(--sub);margin-top:12px">Os dados novos que você criar no app são enviados para a planilha. Use “Recarregar” para puxar o que está na planilha para o app.</div>
+    </div>`;
+}
+
+// ============================================================
 // Navegação e re-render
 // ============================================================
-const SCREENS = { home: renderDashboard, budget: renderBudget, itinerary: renderItinerary, memories: renderMemories, admin: renderAdmin };
+const SCREENS = { home: renderDashboard, budget: renderBudget, itinerary: renderItinerary, memories: renderMemories, admin: renderAdmin, sync: renderSync };
 let current = 'home';
 
 function render() {
@@ -400,7 +495,9 @@ function bindScreenEvents() {
   // Admin actions
   document.querySelectorAll('[data-approve]').forEach((b) => b.onclick = () => {
     const p = PENDING.find((x) => x.id === b.dataset.approve);
-    MEMBERS.push({ ...p, admin: false, canExpense: false });
+    const novo = { id: p.id, name: p.name, initials: p.initials, color: p.color, admin: false, canExpense: false };
+    MEMBERS.push(novo);
+    SYNC.save('Participantes', novo);
     PENDING = PENDING.filter((x) => x.id !== b.dataset.approve); render();
   });
   document.querySelectorAll('[data-reject]').forEach((b) => b.onclick = () => { PENDING = PENDING.filter((x) => x.id !== b.dataset.reject); render(); });
@@ -412,6 +509,20 @@ function bindScreenEvents() {
     TRIP.name = $('#adm-name').value; TRIP.destination = $('#adm-dest').value;
     TRIP.start = $('#adm-start').value; TRIP.end = $('#adm-end').value; TRIP.budget = +$('#adm-budget').value;
     save.textContent = 'Salvo ✓'; setTimeout(() => { save.textContent = 'Salvar alterações'; }, 1500);
+  };
+  // Sync screen
+  const syncSave = $('#sync-save');
+  if (syncSave) syncSave.onclick = async () => {
+    SYNC.url = $('#sync-url').value.trim();
+    syncSave.textContent = 'Conectando...';
+    await SYNC.load();
+    render();
+  };
+  const syncReload = $('#sync-reload');
+  if (syncReload) syncReload.onclick = async () => {
+    syncReload.textContent = 'Recarregando...';
+    await SYNC.load();
+    render();
   };
 }
 
@@ -451,7 +562,9 @@ function openExpenseModal() {
     $('#m-save').onclick = () => {
       if (!(form.desc.trim() && +form.amount && form.split.length)) return;
       const date = form.date ? new Date(form.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}).replace('.','') : 'Hoje';
-      EXPENSES.unshift({ id: Date.now(), desc: form.desc.trim(), cat: form.cat, amount: +form.amount, paidBy: form.paidBy, split: form.split.slice(), date });
+      const novo = { id: Date.now(), desc: form.desc.trim(), cat: form.cat, amount: +form.amount, paidBy: form.paidBy, split: form.split.slice(), date };
+      EXPENSES.unshift(novo);
+      SYNC.save('Despesas', novo);
       closeModal(); render();
     };
   }
@@ -485,9 +598,11 @@ function openActivityModal() {
     $('#m-save').onclick = () => {
       if (!(form.name.trim() && form.time.trim())) return;
       const day = ITINERARY.find((d) => d.day === +form.day);
-      day.items.push({ time: form.time, name: form.name.trim(), place: form.place.trim(), cost: +form.cost||0, cat: form.cat });
+      const item = { time: form.time, name: form.name.trim(), place: form.place.trim(), cost: +form.cost||0, cat: form.cat };
+      day.items.push(item);
       day.items.sort((a,b) => a.time.localeCompare(b.time));
       dayOpen[day.day] = true;
+      SYNC.save('Roteiro', { id: Date.now(), day: day.day, date: day.date, city: day.city, time: item.time, name: item.name, place: item.place, cost: item.cost, cat: item.cat });
       closeModal(); render();
     };
   }
@@ -514,7 +629,9 @@ function openPostModal() {
     $('#m-save').onclick = () => {
       if (!form.text.trim()) return;
       const tags = form.tags.split(/[\s,]+/).filter(Boolean).map((t) => t.startsWith('#')?t:'#'+t);
-      POSTS.unshift({ id: Date.now(), author: MEMBERS[0].id, trip: TRIP.name, time: 'agora', text: form.text.trim(), grad: form.grad, likes: 0, comments: 0, tags });
+      const post = { id: Date.now(), author: MEMBERS[0].id, trip: TRIP.name, time: 'agora', text: form.text.trim(), grad: form.grad, likes: 0, comments: 0, tags };
+      POSTS.unshift(post);
+      SYNC.save('Memorias', post);
       closeModal(); render();
     };
   }
@@ -544,8 +661,15 @@ function init() {
   };
   $('#toggle-dark').innerHTML = svg('moon',17);
   $('#bell-btn').innerHTML = svg('bell',17);
+  $('#config-btn').innerHTML = svg('settings',17);
+  $('#config-btn').onclick = () => { current = 'sync'; window.scrollTo(0,0); render(); };
 
   render();
+
+  // Se já houver planilha conectada, puxa os dados ao abrir
+  if (SYNC.url) {
+    SYNC.load().then((ok) => { if (ok) render(); });
+  }
 
   // splash
   const splash = $('#splash');
