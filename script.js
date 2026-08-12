@@ -1,8 +1,8 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
-   Versão: 2026-08-12-e (dashboard reorganizado)
+   Versão: 2026-08-12-h (orçamento pessoal)
    ============================================================ */
-console.log('%cStigmés script versão 2026-08-12-e', 'color:#1E5AA8;font-weight:bold');
+console.log('%cStigmés script versão 2026-08-12-h', 'color:#1E5AA8;font-weight:bold');
 
 
 /* ---- Login com Google (Google Identity Services) ---- */
@@ -213,11 +213,13 @@ function openTrip(tripId, goToHome) {
       const u = usersByGoogle[p.userId] || {};
       return {
         id: p.userId,
+        partId: p.id,
         name: (u.nome || 'Usuário').split(/\s+/)[0],
         initials: u.iniciais || '??',
         color: u.cor || '#1E5AA8',
         admin: String(p.papel) === 'admin',
         canExpense: p.canExpense === true || p.canExpense === 'TRUE' || p.canExpense === 'sim',
+        orcamento: Number(p.orcamento) || 0,
       };
     });
 
@@ -470,8 +472,8 @@ function nextActivityCard() {
 let budgetTab = 'gastos';
 function renderBudget() {
   const total = EXPENSES.reduce((s,e) => s+e.amount, 0);
-  const pct = Math.round((total / TRIP.budget) * 100);
-  const remaining = TRIP.budget - total;
+  const pct = TRIP.budget ? Math.round((total / TRIP.budget) * 100) : 0;
+  const remaining = (TRIP.budget || 0) - total;
   const byCat = {}; EXPENSES.forEach((e) => byCat[e.cat] = (byCat[e.cat]||0)+e.amount);
   const net = computeBalances(EXPENSES);
   const tx = settle(net);
@@ -500,22 +502,65 @@ function renderBudget() {
 
   const txRows = tx.map((t) => `<div class="tx-row">${avatar(t.from,28)}<span class="nm">${member(t.from).name}</span>${svg('chevronright',16,'var(--sub)')}${avatar(t.to,28)}<span class="nm">${member(t.to).name}</span><span class="v">${TRIP.currency}${t.amount.toFixed(0)}</span></div>`).join('');
 
+  // ---- Aba "Meu": orçamento pessoal do usuário logado ----
+  const eu = MEMBERS.find((m) => m.id === meId());
+  let meuPane = '';
+  if (!eu) {
+    meuPane = `<div class="empty">Entre na viagem para ver seu orçamento pessoal.</div>`;
+  } else {
+    const meuOrc = eu.orcamento || 0;
+    // Minha parte em cada despesa em que entrei na divisão
+    const minhas = EXPENSES.filter((e) => (e.split || []).map(String).includes(String(eu.id)))
+      .map((e) => ({ ...e, minhaParte: e.amount / e.split.length }));
+    const consumido = minhas.reduce((s, e) => s + e.minhaParte, 0);
+    const sobra = meuOrc - consumido;
+    const pctMeu = meuOrc > 0 ? Math.round((consumido / meuOrc) * 100) : 0;
+
+    const linhas = minhas.length ? minhas.map((e) => {
+      const cat = CATEGORIES[e.cat];
+      const paguei = String(e.paidBy) === String(eu.id);
+      return `<div class="expense">
+        <div class="ico" style="background:${cat.color}18">${svg(cat.icon,18,cat.color)}</div>
+        <div class="info"><div class="desc">${esc(e.desc)}</div><div class="meta">${esc(e.date)} · ÷${e.split.length}${paguei?' · você pagou':''}</div></div>
+        <div class="amt serif">${TRIP.currency}${e.minhaParte.toFixed(2)}</div>
+      </div>`;
+    }).join('') : `<div class="empty">Você ainda não entrou em nenhuma despesa.</div>`;
+
+    const semOrc = meuOrc === 0
+      ? `<div style="font-size:12.5px;color:var(--sub);margin-top:8px">Seu orçamento pessoal ainda não foi definido. Peça a um admin para configurá-lo na tela Admin.</div>`
+      : `<div class="track"><div class="fill" style="width:${Math.min(pctMeu,100)}%"></div></div>
+         <div class="row-between" style="margin-top:10px;font-size:12.5px"><span style="color:var(--sub)">${pctMeu}% consumido</span><span style="color:${sobra>=0?C.teal:C.clay};font-weight:600">${sobra>=0?'Ainda sobra ':'Estourou '}${TRIP.currency}${Math.abs(sobra).toFixed(2)}</span></div>`;
+
+    meuPane = `
+      <div class="card budget-summary">
+        <div class="row-between" style="align-items:flex-end">
+          <div><div style="font-size:12px;color:var(--sub)">Gasto por mim</div><div class="big serif">${TRIP.currency}${consumido.toFixed(2)}</div></div>
+          <div style="text-align:right"><div style="font-size:12px;color:var(--sub)">Meu orçamento</div><div class="total serif">${TRIP.currency}${meuOrc.toLocaleString('pt-BR')}</div></div>
+        </div>
+        ${semOrc}
+      </div>
+      <div style="font-size:12px;color:var(--sub);margin:4px 2px 8px"><span>${svg('eye',13,'var(--sub)')} Só você vê seu orçamento. Conta apenas sua parte na divisão.</span></div>
+      <div class="list">${linhas}</div>`;
+  }
+
   return `
     <div class="eyebrow">Módulo financeiro</div>
     <h2 class="section-title serif">Orçamento &amp; Despesas</h2>
     <div class="card budget-summary">
       <div class="row-between" style="align-items:flex-end">
         <div><div style="font-size:12px;color:var(--sub)">Consumido</div><div class="big serif">${TRIP.currency}${total.toLocaleString('pt-BR')}</div></div>
-        <div style="text-align:right"><div style="font-size:12px;color:var(--sub)">Orçamento total</div><div class="total serif">${TRIP.currency}${TRIP.budget.toLocaleString('pt-BR')}</div></div>
+        <div style="text-align:right"><div style="font-size:12px;color:var(--sub)">Orçamento total</div><div class="total serif">${TRIP.currency}${(TRIP.budget||0).toLocaleString('pt-BR')}</div></div>
       </div>
       <div class="track"><div class="fill" style="width:${Math.min(pct,100)}%"></div></div>
       <div class="row-between" style="margin-top:10px;font-size:12.5px"><span style="color:var(--sub)">${pct}% consumido</span><span style="color:${remaining>=0?C.teal:C.clay};font-weight:600">${remaining>=0?'Saldo restante ':'Acima do orçamento '}${TRIP.currency}${Math.abs(remaining).toLocaleString('pt-BR')}</span></div>
     </div>
     <div class="tabs">
+      <button class="tab ${budgetTab==='meu'?'active':''}" data-btab="meu">Meu</button>
       <button class="tab ${budgetTab==='gastos'?'active':''}" data-btab="gastos">Gastos</button>
-      <button class="tab ${budgetTab==='categorias'?'active':''}" data-btab="categorias">Por categoria</button>
-      <button class="tab ${budgetTab==='acerto'?'active':''}" data-btab="acerto">Acerto de contas</button>
+      <button class="tab ${budgetTab==='categorias'?'active':''}" data-btab="categorias">Categoria</button>
+      <button class="tab ${budgetTab==='acerto'?'active':''}" data-btab="acerto">Acerto</button>
     </div>
+    <div class="tabpane ${budgetTab==='meu'?'active':''}">${meuPane}</div>
     <div class="tabpane ${budgetTab==='gastos'?'active':''}"><div class="list">${gastos}</div></div>
     <div class="tabpane ${budgetTab==='categorias'?'active':''}"><div class="card">${cats}</div></div>
     <div class="tabpane ${budgetTab==='acerto'?'active':''}">
@@ -620,6 +665,10 @@ function renderAdmin() {
     <div class="member-perms">
       <button class="pill ${m.admin?'on':''}" data-toggle-admin="${m.id}">${svg('shield',12)} Admin</button>
       <button class="pill ${m.canExpense?'on':''}" data-toggle-expense="${m.id}">${svg('wallet',12)} Lançar gastos</button>
+    </div>
+    <div class="member-budget">
+      <span class="lbl">Orçamento pessoal (${TRIP.currency})</span>
+      <input class="budget-input" type="number" min="0" placeholder="0" value="${m.orcamento||''}" data-budget="${m.id}">
     </div>
   </div>`).join('');
 
@@ -762,8 +811,14 @@ function bindScreenEvents() {
   });
   document.querySelectorAll('[data-reject]').forEach((b) => b.onclick = () => { PENDING = PENDING.filter((x) => x.id !== b.dataset.reject); render(); });
   document.querySelectorAll('[data-remove]').forEach((b) => b.onclick = () => { MEMBERS = MEMBERS.filter((m) => m.id !== b.dataset.remove); render(); });
-  document.querySelectorAll('[data-toggle-admin]').forEach((b) => b.onclick = () => { const m = MEMBERS.find((x) => x.id === b.dataset.toggleAdmin); m.admin = !m.admin; render(); });
-  document.querySelectorAll('[data-toggle-expense]').forEach((b) => b.onclick = () => { const m = MEMBERS.find((x) => x.id === b.dataset.toggleExpense); m.canExpense = !m.canExpense; render(); });
+  document.querySelectorAll('[data-toggle-admin]').forEach((b) => b.onclick = () => { const m = MEMBERS.find((x) => x.id === b.dataset.toggleAdmin); m.admin = !m.admin; if (m.partId) SYNC.update('Participantes', m.partId, { papel: m.admin ? 'admin' : 'participante' }); render(); });
+  document.querySelectorAll('[data-toggle-expense]').forEach((b) => b.onclick = () => { const m = MEMBERS.find((x) => x.id === b.dataset.toggleExpense); m.canExpense = !m.canExpense; if (m.partId) SYNC.update('Participantes', m.partId, { canExpense: m.canExpense }); render(); });
+  document.querySelectorAll('[data-budget]').forEach((inp) => inp.onchange = () => {
+    const m = MEMBERS.find((x) => x.id === inp.dataset.budget);
+    if (!m) return;
+    m.orcamento = Number(inp.value) || 0;
+    if (m.partId) SYNC.update('Participantes', m.partId, { orcamento: m.orcamento });
+  });
   const save = $('#adm-save');
   if (save) save.onclick = () => {
     TRIP.name = $('#adm-name').value; TRIP.destination = $('#adm-dest').value;
