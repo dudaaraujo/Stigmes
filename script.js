@@ -788,18 +788,22 @@ function openExpenseModal() {
       <div class="two-col"><div><div class="field-label mt14">Valor (${TRIP.currency})</div><input class="field" id="f-amount" type="number" placeholder="0" value="${form.amount}"></div><div><div class="field-label mt14">Data</div><input class="field" id="f-date" type="date" value="${form.date}"></div></div>
       <div class="field-label mt14">Categoria</div><div class="chips">${catChips}</div>
       <div class="field-label mt14">Quem pagou</div><div class="chips">${payChips}</div>
-      <div class="row-between mt14"><span class="field-label">Dividir entre · igualitária</span><span class="per-person">${perPerson}</span></div><div class="chips">${splitChips}</div>
+      <div class="row-between mt14"><span class="field-label">Dividir entre · igualitária</span><span class="per-person" id="per-person">${perPerson}</span></div><div class="chips">${splitChips}</div>
       <button class="primary-btn" id="m-save" ${valid?'':'disabled'}>Adicionar despesa</button>
     </div>`;
     overlay().classList.remove('hidden');
     $('#m-close').onclick = closeModal;
     $('#f-desc').oninput = (e) => { form.desc = e.target.value; syncSaveBtn(); };
-    $('#f-amount').oninput = (e) => { form.amount = e.target.value; draw(); };
+    $('#f-amount').oninput = (e) => { form.amount = e.target.value; updatePerPerson(); syncSaveBtn(); };
     $('#f-date').onchange = (e) => { form.date = e.target.value; };
     document.querySelectorAll('[data-cat]').forEach((b) => b.onclick = () => { form.cat = b.dataset.cat; draw(); });
     document.querySelectorAll('[data-pay]').forEach((b) => b.onclick = () => { form.paidBy = b.dataset.pay; draw(); });
     document.querySelectorAll('[data-split]').forEach((b) => b.onclick = () => { const id = b.dataset.split; form.split = form.split.includes(id) ? form.split.filter((x) => x!==id) : [...form.split, id]; draw(); });
-    function syncSaveBtn() { const ok = form.desc.trim() && +form.amount && form.split.length; $('#m-save').disabled = !ok; }
+    function syncSaveBtn() { const ok = form.desc.trim() && +form.amount && form.split.length; const btn = $('#m-save'); if (btn) btn.disabled = !ok; }
+    function updatePerPerson() {
+      const el = $('#per-person');
+      if (el) el.textContent = (form.split.length && +form.amount) ? `${TRIP.currency}${(+form.amount/form.split.length).toFixed(2)} por pessoa` : '';
+    }
     $('#m-save').onclick = () => {
       if (!(form.desc.trim() && +form.amount && form.split.length)) return;
       const date = form.date ? new Date(form.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}).replace('.','') : 'Hoje';
@@ -859,14 +863,19 @@ function openActivityModal() {
     $('#m-close').onclick = closeModal;
     document.querySelectorAll('[data-modo]').forEach((b) => b.onclick = () => { form.modo = b.dataset.modo; draw(); });
     if ($('#f-day')) $('#f-day').onchange = (e) => { form.day = e.target.value; };
-    if ($('#f-novodia')) $('#f-novodia').oninput = (e) => { form.novoDia = e.target.value; };
-    if ($('#f-novadata')) $('#f-novadata').onchange = (e) => { form.novaData = e.target.value; };
-    if ($('#f-novacidade')) $('#f-novacidade').oninput = (e) => { form.novaCidade = e.target.value; draw(); };
-    $('#f-time').oninput = (e) => { form.time = e.target.value; draw(); };
+    if ($('#f-novodia')) $('#f-novodia').oninput = (e) => { form.novoDia = e.target.value; syncValid(); };
+    if ($('#f-novadata')) $('#f-novadata').onchange = (e) => { form.novaData = e.target.value; syncValid(); };
+    if ($('#f-novacidade')) $('#f-novacidade').oninput = (e) => { form.novaCidade = e.target.value; syncValid(); };
+    $('#f-time').oninput = (e) => { form.time = e.target.value; syncValid(); };
     $('#f-cost').oninput = (e) => { form.cost = e.target.value; };
-    $('#f-name').oninput = (e) => { form.name = e.target.value; draw(); };
+    $('#f-name').oninput = (e) => { form.name = e.target.value; syncValid(); };
     $('#f-place').oninput = (e) => { form.place = e.target.value; };
     document.querySelectorAll('[data-cat]').forEach((b) => b.onclick = () => { form.cat = b.dataset.cat; draw(); });
+    // Revalida o botão sem reconstruir o modal (evita perder o foco / "pular")
+    function syncValid() {
+      const ok = form.name.trim() && form.time.trim() && (form.modo === 'existente' ? !!form.day : (form.novoDia && form.novaCidade.trim()));
+      const btn = $('#m-save'); if (btn) btn.disabled = !ok;
+    }
     $('#m-save').onclick = () => {
       let dayNum, dayDate, dayCity;
       if (form.modo === 'existente') {
