@@ -168,6 +168,8 @@ button { font-family: inherit; }
   padding: 13px; display: flex; align-items: center; gap: 12px;
 }
 .expense .ico { width: 40px; height: 40px; border-radius: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.expense-clickable { cursor: pointer; }
+.expense-clickable:hover { border-color: var(--blue); }
 .expense .info { flex: 1; min-width: 0; }
 .expense .desc { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .expense .meta { font-size: 11.5px; color: var(--sub); margin-top: 2px; }
@@ -292,6 +294,23 @@ button { font-family: inherit; }
   color: var(--blue); background: rgba(30,90,168,.09); border: none; border-radius: 9px;
   padding: 7px 11px; cursor: pointer;
 }
+.invite-code-box { display:flex; align-items:center; gap:10px; }
+.invite-code {
+  flex:1; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size:18px; font-weight:700;
+  letter-spacing:1.5px; color:var(--blue); background:rgba(30,90,168,.08);
+  border:1px dashed var(--blue); border-radius:10px; padding:12px 14px; text-align:center;
+}
+.copy-btn {
+  display:flex; align-items:center; gap:5px; font-size:13px; font-weight:600; white-space:nowrap;
+  color:#fff; background:var(--blue); border:none; border-radius:10px; padding:11px 14px; cursor:pointer;
+}
+.code-entry-btn {
+  display:flex; align-items:center; justify-content:center; gap:7px; width:100%;
+  font-size:14px; font-weight:600; color:var(--teal); background:rgba(46,139,139,.10);
+  border:1px solid rgba(46,139,139,.25); border-radius:12px; padding:12px; cursor:pointer;
+  margin-bottom:14px;
+}
+.code-entry-btn:hover { background:rgba(46,139,139,.16); }
 
 /* ---- Form fields ---- */
 .field {
