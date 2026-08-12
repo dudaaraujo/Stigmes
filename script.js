@@ -529,16 +529,24 @@ function renderItinerary() {
     </div>`;
   }).join('');
 
-  const empty = filtered.length === 0 ? `<div class="empty">Nada encontrado para “${esc(itinQuery)}”. Tente outro termo.</div>` : '';
+  let empty = '';
+  if (ITINERARY.length === 0) {
+    empty = `<div class="empty">Nenhuma atividade no roteiro ainda.<br>Toque no + para adicionar a primeira.</div>`;
+  } else if (filtered.length === 0) {
+    empty = `<div class="empty">Nada encontrado para “${esc(itinQuery)}”. Tente outro termo.</div>`;
+  }
 
-  return `
-    <div class="eyebrow">Módulo roteiro</div>
-    <h2 class="section-title serif">Cronograma diário</h2>
+  const searchBar = ITINERARY.length > 0 ? `
     <div class="search-wrap">
       ${svg('search',16)}
       <input id="itin-search" type="text" placeholder="Buscar atividade, local ou cidade" value="${esc(itinQuery)}">
       ${itinQuery ? `<button class="clear" id="itin-clear">${svg('x',16)}</button>` : ''}
-    </div>
+    </div>` : '';
+
+  return `
+    <div class="eyebrow">Módulo roteiro</div>
+    <h2 class="section-title serif">Cronograma diário</h2>
+    ${searchBar}
     ${empty}${daysHtml}`;
 }
 
@@ -805,15 +813,42 @@ function openExpenseModal() {
 }
 
 function openActivityModal() {
-  let form = { day: String(ITINERARY[0].day), time: '', name: '', place: '', cost: '', cat: 'passeios' };
+  // Se já há dias, permite escolher; sempre permite criar um novo dia.
+  const temDias = ITINERARY.length > 0;
+  let form = {
+    modo: temDias ? 'existente' : 'novo',   // 'existente' | 'novo'
+    day: temDias ? String(ITINERARY[0].day) : '',
+    novoDia: temDias ? String(Math.max.apply(null, ITINERARY.map((d) => d.day)) + 1) : '1',
+    novaData: '', novaCidade: '',
+    time: '', name: '', place: '', cost: '', cat: 'passeios',
+  };
   function draw() {
-    const dayOpts = ITINERARY.map((d) => `<option value="${d.day}" ${+form.day===d.day?'selected':''}>Dia ${d.day} · ${d.city} (${d.date})</option>`).join('');
+    const dayOpts = ITINERARY.map((d) => `<option value="${d.day}" ${+form.day===d.day?'selected':''}>Dia ${d.day} · ${esc(d.city)} (${esc(d.date)})</option>`).join('');
     const catChips = Object.entries(CATEGORIES).map(([k,c]) => `<button class="chip ${form.cat===k?'on':''}" data-cat="${k}" style="${form.cat===k?`border-color:${c.color};background:${c.color}18;color:${c.color}`:''}">${svg(c.icon,14,form.cat===k?c.color:'currentColor')} ${c.label}</button>`).join('');
-    const valid = form.name.trim() && form.time.trim();
+
+    // seletor de "onde adicionar": dia existente ou novo dia
+    const escolha = temDias ? `
+      <div class="field-label">Onde adicionar</div>
+      <div class="chips" style="margin-bottom:4px">
+        <button class="chip ${form.modo==='existente'?'on':''}" data-modo="existente" style="${form.modo==='existente'?`border-color:${C.blue};background:${C.blue}15;color:${C.blue}`:''}">Dia existente</button>
+        <button class="chip ${form.modo==='novo'?'on':''}" data-modo="novo" style="${form.modo==='novo'?`border-color:${C.blue};background:${C.blue}15;color:${C.blue}`:''}">Novo dia</button>
+      </div>` : '';
+
+    const blocoExistente = (temDias && form.modo === 'existente')
+      ? `<div class="field-label mt14">Dia</div><select class="field" id="f-day">${dayOpts}</select>`
+      : '';
+
+    const blocoNovo = (form.modo === 'novo')
+      ? `<div class="two-col"><div><div class="field-label mt14">Nº do dia</div><input class="field" id="f-novodia" type="number" value="${esc(form.novoDia)}"></div><div><div class="field-label mt14">Data</div><input class="field" id="f-novadata" type="date" value="${form.novaData}"></div></div>
+         <div class="field-label mt14">Cidade</div><input class="field" id="f-novacidade" placeholder="Ex.: Paris" value="${esc(form.novaCidade)}">`
+      : '';
+
+    const valid = form.name.trim() && form.time.trim() && (form.modo === 'existente' ? !!form.day : (form.novoDia && form.novaCidade.trim()));
+
     overlay().innerHTML = `<div class="modal">
       <div class="modal-grab"></div>
       <div class="modal-head"><h3 class="serif">Nova atividade</h3><button id="m-close">${svg('x',20)}</button></div>
-      <div class="field-label">Dia</div><select class="field" id="f-day">${dayOpts}</select>
+      ${escolha}${blocoExistente}${blocoNovo}
       <div class="two-col"><div><div class="field-label mt14">Horário</div><input class="field" id="f-time" type="time" value="${form.time}"></div><div><div class="field-label mt14">Valor estimado (${TRIP.currency})</div><input class="field" id="f-cost" type="number" placeholder="0" value="${form.cost}"></div></div>
       <div class="field-label mt14">Atividade</div><input class="field" id="f-name" placeholder="Ex.: Museu do Louvre" value="${esc(form.name)}">
       <div class="field-label mt14">Local / endereço</div><input class="field" id="f-place" placeholder="Ex.: Rue de Rivoli" value="${esc(form.place)}">
@@ -822,15 +857,32 @@ function openActivityModal() {
     </div>`;
     overlay().classList.remove('hidden');
     $('#m-close').onclick = closeModal;
-    $('#f-day').onchange = (e) => { form.day = e.target.value; };
-    $('#f-time').oninput = (e) => { form.time = e.target.value; $('#m-save').disabled = !(form.name.trim() && form.time.trim()); };
+    document.querySelectorAll('[data-modo]').forEach((b) => b.onclick = () => { form.modo = b.dataset.modo; draw(); });
+    if ($('#f-day')) $('#f-day').onchange = (e) => { form.day = e.target.value; };
+    if ($('#f-novodia')) $('#f-novodia').oninput = (e) => { form.novoDia = e.target.value; };
+    if ($('#f-novadata')) $('#f-novadata').onchange = (e) => { form.novaData = e.target.value; };
+    if ($('#f-novacidade')) $('#f-novacidade').oninput = (e) => { form.novaCidade = e.target.value; draw(); };
+    $('#f-time').oninput = (e) => { form.time = e.target.value; draw(); };
     $('#f-cost').oninput = (e) => { form.cost = e.target.value; };
-    $('#f-name').oninput = (e) => { form.name = e.target.value; $('#m-save').disabled = !(form.name.trim() && form.time.trim()); };
+    $('#f-name').oninput = (e) => { form.name = e.target.value; draw(); };
     $('#f-place').oninput = (e) => { form.place = e.target.value; };
     document.querySelectorAll('[data-cat]').forEach((b) => b.onclick = () => { form.cat = b.dataset.cat; draw(); });
     $('#m-save').onclick = () => {
+      let dayNum, dayDate, dayCity;
+      if (form.modo === 'existente') {
+        const d = ITINERARY.find((x) => x.day === +form.day);
+        if (!d) return;
+        dayNum = d.day; dayDate = d.date; dayCity = d.city;
+      } else {
+        dayNum = +form.novoDia || (ITINERARY.length ? Math.max.apply(null, ITINERARY.map((d) => d.day)) + 1 : 1);
+        // formata a data escolhida (YYYY-MM-DD → "08 Jul")
+        dayDate = form.novaData ? new Date(form.novaData).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '') : '';
+        dayCity = form.novaCidade.trim();
+      }
       if (!(form.name.trim() && form.time.trim())) return;
-      const day = ITINERARY.find((d) => d.day === +form.day);
+
+      let day = ITINERARY.find((x) => x.day === dayNum);
+      if (!day) { day = { day: dayNum, date: dayDate, city: dayCity, items: [] }; ITINERARY.push(day); ITINERARY.sort((a,b) => a.day - b.day); }
       const item = { time: form.time, name: form.name.trim(), place: form.place.trim(), cost: +form.cost||0, cat: form.cat };
       day.items.push(item);
       day.items.sort((a,b) => a.time.localeCompare(b.time));
