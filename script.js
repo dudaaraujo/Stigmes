@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-12-p';
+const APP_VERSION = '2026-08-12-r';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -81,6 +81,36 @@ const SYNC = {
   get url() { return localStorage.getItem('stigmes_sheet_url') || DEFAULT_SHEET_URL; },
   set url(v) { localStorage.setItem('stigmes_sheet_url', v || ''); },
   status: 'off', // off | ok | erro | ...
+
+  // Recarrega em segundo plano, sem interromper o usuário.
+  // Não redesenha se um modal estiver aberto ou se o usuário estiver digitando.
+  async refresh() {
+    if (!this.url) return;
+    if (document.hidden) return;  // aba em segundo plano: não gasta à toa
+    const modalAberto = overlay() && !overlay().classList.contains('hidden');
+    const digitando = document.activeElement && ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName);
+    if (modalAberto || digitando) return;  // adia: tenta de novo no próximo ciclo
+    try {
+      const data = await this.jsonp(this.url);
+      ALL = data;
+      TRIPS = (data.Viagens || []).map((v) => ({
+        id: String(v.id), name: v.nome || 'Viagem', destination: v.destino || '',
+        start: v.inicio || '', end: v.fim || '', budget: Number(v.orcamento) || 0,
+        currency: v.moeda || '€', criadaPor: v.criadaPor || '',
+      }));
+      if (TRIP) openTrip(TRIP.id, false);
+      this.status = 'ok';
+      render();
+    } catch (err) {
+      console.error('Falha no auto-sync:', err);
+    }
+  },
+
+  // Liga a atualização automática (a cada 60s). Seguro chamar mais de uma vez.
+  startAutoSync() {
+    if (this._timer) return;
+    this._timer = setInterval(() => { SYNC.refresh(); }, 60000);
+  },
 
   async load() {
     if (!this.url) return false;
@@ -767,7 +797,7 @@ function renderSync() {
         <li><b>Implantar → Nova implantação → App da Web</b>. Acesso: <b>Qualquer pessoa</b>.</li>
         <li>Copie a URL e cole aqui em cima.</li>
       </ol>
-      <div style="font-size:12px;color:var(--sub);margin-top:12px">Os dados novos que você criar no app são enviados para a planilha. Use “Recarregar” para puxar o que está na planilha para o app.</div>
+      <div style="font-size:12px;color:var(--sub);margin-top:12px">Os dados novos que você criar no app são enviados para a planilha. Use “Recarregar” para puxar o que está na planilha para o app. O app também atualiza sozinho a cada 1 minuto.</div>
     </div>
     <div style="text-align:center;font-size:12px;color:var(--sub);margin:8px 0 4px">Stigmés · versão ${APP_VERSION}</div>`;
 }
@@ -1366,6 +1396,7 @@ function enterApp(preload) {
     };
     if (preload) preload.then(done);
     else SYNC.load().then(done);
+    SYNC.startAutoSync();  // atualização automática a cada 60s
   }
 }
 
