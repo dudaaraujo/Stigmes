@@ -328,8 +328,8 @@ input.field[type="time"], input.field[type="date"], input.field[type="number"] {
   min-width: 0; width: 100%; box-sizing: border-box;
 }
 input.field[type="number"] { -webkit-appearance: none; appearance: none; }
-/* Telas bem estreitas: empilha as duas colunas para nunca sobrepor no iOS */
-@media (max-width: 360px) {
+/* Celular: empilha as duas colunas para nunca sobrepor (input time do iOS é largo) */
+@media (max-width: 480px) {
   .two-col { flex-direction: column; gap: 0; }
 }
 .primary-btn {
