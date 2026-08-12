@@ -812,24 +812,36 @@ function showLogin() {
   }
 
   // Carrega a biblioteca do Google e desenha o botão
+  let booted = false;
   const boot = () => {
-    google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: AUTH.handleCredential });
-    google.accounts.id.renderButton($('#login-google'), { theme: 'filled_blue', size: 'large', shape: 'pill', text: 'signin_with', locale: 'pt-BR' });
-    google.accounts.id.prompt(); // tenta login automático (One Tap)
+    try {
+      booted = true;
+      google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: AUTH.handleCredential });
+      google.accounts.id.renderButton($('#login-google'), { theme: 'filled_blue', size: 'large', shape: 'pill', text: 'signin_with', locale: 'pt-BR' });
+      google.accounts.id.prompt();
+    } catch (err) {
+      console.error('Falha ao iniciar Google Login:', err);
+      forceGuestFallback('Não foi possível iniciar o login do Google. Verifique o Client ID e as origens autorizadas.');
+    }
   };
-  if (window.google && google.accounts) boot();
-  else {
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true; s.defer = true;
-    s.onload = boot;
-    document.head.appendChild(s);
-  }
+  if (window.google && google.accounts) { boot(); return; }
+
+  const s = document.createElement('script');
+  s.src = 'https://accounts.google.com/gsi/client';
+  s.async = true; s.defer = true;
+  s.onload = boot;
+  s.onerror = () => forceGuestFallback('Não foi possível carregar a biblioteca do Google (sem internet ou bloqueada).');
+  document.head.appendChild(s);
+
+  // Rede de segurança: se em 6s o Google não carregou, libera o convidado
+  setTimeout(() => { if (!booted) forceGuestFallback('O login do Google demorou a responder.'); }, 6000);
 }
 
 // Entra no app depois de logado
 function enterApp() {
-  $('#login').style.display = 'none';
+  const login = $('#login');
+  login.classList.add('screen-hidden');
+  login.style.display = 'none';
   $('.app').style.display = '';
   $('.nav').style.display = '';
 
@@ -849,4 +861,13 @@ function enterApp() {
   if (SYNC.url) SYNC.load().then((ok) => { if (ok) render(); });
 }
 
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    init();
+  } catch (err) {
+    console.error('Erro fatal na inicialização:', err);
+    const splash = document.getElementById('splash');
+    if (splash) { splash.classList.add('leaving'); setTimeout(() => splash.classList.add('gone'), 500); }
+    forceGuestFallback('Ocorreu um erro ao iniciar o app.');
+  }
+});
