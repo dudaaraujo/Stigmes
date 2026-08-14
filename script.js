@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-i (espaço p/ botão +)';
+const APP_VERSION = '2026-08-14-j (resumo do roteiro)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -874,6 +874,11 @@ function renderAdmin() {
       ${members}
     </div>
     <div class="card admin-block">
+      <div class="mini-label admin-title" style="margin-bottom:10px">${svg('calendar',14)} Custo do roteiro</div>
+      <div style="font-size:12.5px;color:var(--sub);margin-bottom:12px">Veja o total estimado das atividades planejadas, por categoria, comparado ao orçamento.</div>
+      <button class="primary-btn" id="adm-roteiro-resumo" style="background:var(--teal)">Ver resumo do roteiro</button>
+    </div>
+    <div class="card admin-block">
       <div class="mini-label admin-title" style="margin-bottom:6px">${svg('wallet',14)} Orçamento por categoria</div>
       <div style="font-size:12.5px;color:var(--sub);margin-bottom:12px">Defina um limite para cada tipo de gasto da viagem (opcional). Deixe 0 para não limitar.</div>
       ${Object.keys(CATEGORIES).map((k) => {
@@ -1041,6 +1046,8 @@ function bindScreenEvents() {
     SYNC.update('Viagens', TRIP.id, { nome: TRIP.name, destino: TRIP.destination, inicio: TRIP.start, fim: TRIP.end, orcamento: TRIP.budget });
     save.textContent = 'Salvo ✓'; setTimeout(() => { save.textContent = 'Salvar alterações'; }, 1500);
   };
+  const roteiroResumo = $('#adm-roteiro-resumo');
+  if (roteiroResumo) roteiroResumo.onclick = () => openRoteiroResumo();
   const saveCat = $('#adm-save-cat');
   if (saveCat) saveCat.onclick = () => {
     if (!TRIP.orcCat) TRIP.orcCat = {};
@@ -1293,7 +1300,64 @@ function openActivityModal(editItem, editDay) {
   draw();
 }
 
-// Menu: abrir um local no Waze ou no Google Maps
+// Modal: resumo do custo estimado do roteiro (por categoria vs orçamento)
+function openRoteiroResumo() {
+  // Soma o custo estimado de todas as atividades, por categoria
+  const porCat = {};
+  let totalRoteiro = 0;
+  ITINERARY.forEach((d) => (d.items || []).forEach((it) => {
+    const c = Number(it.cost) || 0;
+    if (c <= 0) return;
+    const k = it.cat || 'outros';
+    porCat[k] = (porCat[k] || 0) + c;
+    totalRoteiro += c;
+  }));
+
+  const orcTotal = TRIP.budget || 0;
+  const orcCat = TRIP.orcCat || {};
+  const sobra = orcTotal - totalRoteiro;
+
+  const linhasCat = Object.keys(CATEGORIES).map((k) => {
+    const cat = CATEGORIES[k];
+    const est = porCat[k] || 0;
+    const lim = orcCat[k] || 0;
+    if (est === 0 && lim === 0) return '';
+    let direita, cor = 'var(--sub)', barra = '';
+    if (lim > 0) {
+      const p = Math.round((est / lim) * 100);
+      const estourou = est > lim;
+      cor = estourou ? C.clay : 'var(--sub)';
+      direita = `${TRIP.currency}${est.toLocaleString('pt-BR')} <span style="color:var(--sub)">de ${TRIP.currency}${lim.toLocaleString('pt-BR')}</span>`;
+      barra = `<div class="bar" style="margin-top:5px"><span style="width:${Math.min(p,100)}%;background:${estourou?C.clay:cat.color}"></span></div>`;
+    } else {
+      direita = `${TRIP.currency}${est.toLocaleString('pt-BR')}`;
+    }
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div class="row-between"><span style="font-size:13.5px;font-weight:600">${svg(cat.icon,15,cat.color)} ${cat.label}</span><span style="font-size:13.5px;color:${cor}">${direita}</span></div>
+      ${barra}
+    </div>`;
+  }).join('');
+
+  overlay().innerHTML = `<div class="modal">
+    <div class="modal-grab"></div>
+    <div class="modal-head"><h3 class="serif">Resumo do roteiro</h3><button id="m-close">${svg('x',20)}</button></div>
+    <div style="font-size:13px;color:var(--sub);margin-bottom:14px">Soma dos valores estimados das atividades planejadas.</div>
+
+    <div class="card" style="background:${sobra>=0?'rgba(46,139,139,.08)':'rgba(181,101,74,.10)'};border:none;text-align:center;padding:16px">
+      <div style="font-size:12px;color:var(--sub)">Estimado no roteiro</div>
+      <div class="saldo-big serif" style="color:${sobra>=0?C.teal:C.clay}">${TRIP.currency}${totalRoteiro.toLocaleString('pt-BR')}</div>
+      ${orcTotal>0 ? `<div style="font-size:12.5px;color:var(--sub);margin-top:4px">${sobra>=0?'Dentro do orçamento — sobram':'Passou do orçamento em'} <b style="color:${sobra>=0?C.teal:C.clay}">${TRIP.currency}${Math.abs(sobra).toLocaleString('pt-BR')}</b> <span style="color:var(--sub)">(de ${TRIP.currency}${orcTotal.toLocaleString('pt-BR')})</span></div>` : `<div style="font-size:12.5px;color:var(--sub);margin-top:4px">Defina o orçamento total da viagem para comparar.</div>`}
+    </div>
+
+    ${linhasCat ? `<div class="mini-label" style="margin:16px 0 4px">Por categoria</div>${linhasCat}` : `<div class="empty">Nenhuma atividade com valor estimado ainda.</div>`}
+
+    <div style="font-size:11.5px;color:var(--sub);margin-top:14px;line-height:1.5">Este é o custo <b>planejado</b> (estimativas do roteiro), diferente do que já foi <b>gasto de verdade</b> (aba Orçamento).</div>
+  </div>`;
+  overlay().classList.remove('hidden');
+  $('#m-close').onclick = closeModal;
+}
+
+// Modal: resumo do custo estimado do roteiro — fim
 function openMapaModal(local) {
   const q = encodeURIComponent(local || '');
   const wazeUrl = `https://waze.com/ul?q=${q}&navigate=yes`;
