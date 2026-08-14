@@ -463,6 +463,9 @@ textarea.field { resize: vertical; font-family: inherit; }
 /* ---- Marca (imagem única com símbolo + texto) ---- */
 .logo-symbol { width: 200px; height: auto; border-radius: 22px; animation: logoIn .9s cubic-bezier(.2,.7,.3,1) .1s both; }
 .logo-symbol-sm { height: 38px; width: auto; border-radius: 8px; }
+.logo-anim-sm { height: 38px; width: 38px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
+.logo-anim-sm svg { height: 100%; width: auto; }
+.logo-anim svg { width: 100%; height: 100%; display: block; }
 
 /* ---- Login ---- */
 .login {
