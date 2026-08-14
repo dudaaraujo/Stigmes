@@ -281,6 +281,9 @@ body.dark .budget-alert.warn { color: #e8c65a; }
 .post-actions { display: flex; gap: 20px; margin-top: 12px; color: var(--sub); font-size: 13px; }
 .post-actions button, .post-actions span { display: flex; align-items: center; gap: 6px; background: none; border: none; cursor: pointer; color: inherit; padding: 0; font-size: 13px; }
 .post-actions .liked { color: var(--clay); }
+.post-comments { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.post-comments .cmt { font-size: 13px; line-height: 1.4; color: var(--sub); }
+.post-comments .cmt b { color: var(--text); margin-right: 4px; }
 
 /* ---- Admin ---- */
 .admin-block { margin-bottom: 14px; }
