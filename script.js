@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-e (mapa no roteiro)';
+const APP_VERSION = '2026-08-14-g (busca sem acento)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -404,6 +404,8 @@ const GRADS = [
 const $ = (sel) => document.querySelector(sel);
 const member = (id) => MEMBERS.find((m) => m.id === id) || PENDING.find((m) => m.id === id) || { id, name: 'Usuário', initials: '??', color: '#1E5AA8' };
 const meId = () => (AUTH.user ? AUTH.user.id : null);
+// Normaliza texto para busca: minúsculo e sem acentos ("Málaga" -> "malaga")
+const semAcento = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const meIsAdmin = () => { const m = MEMBERS.find((x) => x.id === meId()); return !!(m && m.admin); };
 
 // Lê um arquivo de imagem e devolve um data URL JPEG comprimido (máx ~1200px, qualidade 0.8).
@@ -670,10 +672,10 @@ function renderBudget() {
 let itinQuery = '';
 let dayOpen = { 1: true, 2: true };
 function renderItinerary() {
-  const q = itinQuery.trim().toLowerCase();
+  const q = semAcento(itinQuery.trim());
   const filtered = ITINERARY.map((d) => ({
     ...d,
-    items: q ? d.items.filter((it) => it.name.toLowerCase().includes(q) || it.place.toLowerCase().includes(q) || d.city.toLowerCase().includes(q)) : d.items,
+    items: q ? d.items.filter((it) => semAcento(it.name).includes(q) || semAcento(it.place).includes(q) || semAcento(d.city).includes(q)) : d.items,
   })).filter((d) => !q || d.items.length > 0);
 
   const daysHtml = filtered.map((d) => {
@@ -714,7 +716,6 @@ function renderItinerary() {
     </div>` : '';
 
   return `
-    <div class="eyebrow">Módulo roteiro</div>
     <h2 class="section-title serif">Cronograma diário</h2>
     ${searchBar}
     ${empty}${daysHtml}`;
