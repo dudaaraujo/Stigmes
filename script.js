@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-j (resumo do roteiro)';
+const APP_VERSION = '2026-08-14-k (social + navegação)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -295,7 +295,14 @@ function openTrip(tripId, goToHome) {
   // Memórias desta viagem
   POSTS = (data.Memorias || [])
     .filter((p) => String(p.tripId) === String(t.id))
-    .map((p) => ({ ...p, likes: Number(p.likes) || 0, comments: Number(p.comments) || 0, tags: Array.isArray(p.tags) ? p.tags : [] }));
+    .map((p) => ({
+      ...p,
+      likes: Number(p.likes) || 0,
+      comments: Number(p.comments) || 0,
+      tags: Array.isArray(p.tags) ? p.tags : [],
+      likedBy: Array.isArray(p.likedBy) ? p.likedBy : (p.likedBy ? String(p.likedBy).split(',').filter(Boolean) : []),
+      comentarios: parseComentarios(p.comentariosTexto),
+    }));
 
   if (goToHome) { current = 'home'; window.scrollTo(0, 0); render(); }
 }
@@ -415,6 +422,25 @@ const member = (id) => MEMBERS.find((m) => m.id === id) || PENDING.find((m) => m
 const meId = () => (AUTH.user ? AUTH.user.id : null);
 // Normaliza texto para busca: minúsculo e sem acentos ("Málaga" -> "malaga")
 const semAcento = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+// Descobre o dia da semana a partir de uma data tipo "18 de ago".
+// Usa o ano da viagem (início) para montar a data completa.
+const MESES_PT = { jan:0, fev:1, mar:2, abr:3, mai:4, jun:5, jul:6, ago:7, set:8, out:9, nov:10, dez:11 };
+const DIAS_SEMANA = ['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
+function diaDaSemana(dateStr) {
+  if (!dateStr) return '';
+  const m = String(dateStr).toLowerCase().match(/(\d{1,2})\s*de\s*([a-zç]{3})/);
+  if (!m) return '';
+  const dia = parseInt(m[1], 10);
+  const mes = MESES_PT[m[2].slice(0,3)];
+  if (mes == null) return '';
+  // ano: usa o da data de início da viagem, senão o ano atual
+  let ano = new Date().getFullYear();
+  if (TRIP && TRIP.start) { const a = new Date(TRIP.start).getFullYear(); if (a) ano = a; }
+  const d = new Date(ano, mes, dia);
+  if (isNaN(d)) return '';
+  return DIAS_SEMANA[d.getDay()];
+}
 const meIsAdmin = () => { const m = MEMBERS.find((x) => x.id === meId()); return !!(m && m.admin); };
 
 // Lê um arquivo de imagem e devolve um data URL JPEG comprimido (máx ~1200px, qualidade 0.8).
@@ -530,7 +556,8 @@ function renderTrips() {
     if (st === 'ativo') acao = `<button class="trip-open" data-open="${esc(t.id)}">Abrir</button>`;
     else if (st === 'pendente') acao = `<button class="trip-open" disabled style="opacity:.6">${svg('clock',14)} Aguardando aprovação</button>`;
     else acao = `<button class="trip-join" data-join="${esc(t.id)}">Participar</button>`;
-    return `<div class="trip-card">
+    const cardClickavel = st === 'ativo';
+    return `<div class="trip-card${cardClickavel?' trip-card-clickable':''}"${cardClickavel?` data-open-card="${esc(t.id)}"`:''}>
       <div class="trip-cover"></div>
       <div class="trip-body">
         <div class="trip-name serif">${esc(t.name)}</div>
@@ -603,11 +630,13 @@ function nextActivityCard() {
   for (const d of ITINERARY) {
     if (d.items && d.items.length) {
       const it = d.items[0];
+      const btnMapa = (it.place || '').trim() ? `<button class="tl-map" data-map="${esc(it.place)}" title="Abrir no mapa">${svg('mappin',18,C.blue)}</button>` : '';
       return `<div class="card" style="margin-top:12px">
         <div class="mini-label">Próxima atividade</div>
         <div class="next-row">
           <div class="next-ico">${svg('ticket',20)}</div>
           <div style="flex:1"><div style="font-weight:600">${esc(it.name)}</div><div style="font-size:12px;color:var(--sub)">${esc(d.date)} · ${esc(it.time)} · ${esc(it.place)}</div></div>
+          ${btnMapa}
         </div>
       </div>`;
     }
@@ -767,7 +796,7 @@ function renderItinerary() {
     return `<div class="day">
       <button class="day-head" data-day="${d.day}">
         <div class="day-badge"><span class="d1">DIA</span><span class="d2 serif">${d.day}</span></div>
-        <div class="day-title"><div class="c">${esc(d.city)}</div><div class="m">${d.date} · ${d.items.length} atividades · ${TRIP.currency}${dayCost}</div></div>
+        <div class="day-title"><div class="c">${esc(d.city)}</div><div class="m">${(() => { const ds = diaDaSemana(d.date); return ds ? ds.charAt(0).toUpperCase()+ds.slice(1)+' · ' : ''; })()}${d.date} · ${d.items.length} atividades · ${TRIP.currency}${dayCost}</div></div>
         <span class="day-chevron ${isOpen?'':'closed'}">${svg('chevrondown',20,'var(--sub)')}</span>
       </button>
       ${isOpen ? `<div class="timeline"><div class="spine"></div>${items}</div>` : ''}
@@ -797,10 +826,67 @@ function renderItinerary() {
 // ============================================================
 // RENDER: Memories
 // ============================================================
+// Comentários são guardados num texto: "Nome::texto ~~ Nome::texto"
+function parseComentarios(txt) {
+  if (!txt) return [];
+  return String(txt).split(' ~~ ').filter(Boolean).map((c) => {
+    const i = c.indexOf('::');
+    return i >= 0 ? { nome: c.slice(0, i), texto: c.slice(i + 2) } : { nome: '', texto: c };
+  });
+}
+function serializeComentarios(arr) {
+  return arr.map((c) => `${c.nome}::${c.texto}`).join(' ~~ ');
+}
+
+// Curtir/descurtir um post (salva na planilha)
+function toggleLike(postId) {
+  const p = POSTS.find((x) => String(x.id) === String(postId));
+  if (!p) return;
+  const meu = String(meId());
+  p.likedBy = p.likedBy || [];
+  const idx = p.likedBy.map(String).indexOf(meu);
+  if (idx >= 0) p.likedBy.splice(idx, 1); else p.likedBy.push(meu);
+  p.likes = p.likedBy.length;
+  SYNC.update('Memorias', postId, { likedBy: p.likedBy.slice(), likes: p.likes });
+  render();
+}
+
+// Modal para adicionar um comentário
+function openComentarioModal(postId) {
+  const p = POSTS.find((x) => String(x.id) === String(postId));
+  if (!p) return;
+  let texto = '';
+  const listaHtml = (p.comentarios || []).length
+    ? (p.comentarios).map((c) => `<div class="cmt"><b>${esc(c.nome)}</b> ${esc(c.texto)}</div>`).join('')
+    : `<div style="font-size:13px;color:var(--sub)">Ainda sem comentários. Seja o primeiro!</div>`;
+  overlay().innerHTML = `<div class="modal">
+    <div class="modal-grab"></div>
+    <div class="modal-head"><h3 class="serif">Comentários</h3><button id="m-close">${svg('x',20)}</button></div>
+    <div class="post-comments" style="max-height:240px;overflow:auto;margin-bottom:12px">${listaHtml}</div>
+    <textarea class="field" id="f-cmt" rows="3" placeholder="Escreva um comentário..."></textarea>
+    <button class="primary-btn" id="m-send" disabled>Comentar</button>
+  </div>`;
+  overlay().classList.remove('hidden');
+  $('#m-close').onclick = closeModal;
+  $('#f-cmt').oninput = (e) => { texto = e.target.value; $('#m-send').disabled = !texto.trim(); };
+  $('#m-send').onclick = () => {
+    if (!texto.trim()) return;
+    const nome = member(meId()).name || 'Você';
+    p.comentarios = p.comentarios || [];
+    p.comentarios.push({ nome, texto: texto.trim() });
+    p.comments = p.comentarios.length;
+    SYNC.update('Memorias', postId, { comentariosTexto: serializeComentarios(p.comentarios), comments: p.comments });
+    closeModal(); render();
+  };
+}
+
 let liked = {};
 function renderMemories() {
   const posts = POSTS.map((p) => {
-    const isLiked = liked[p.id];
+    const meuId = meId();
+    const curtidores = (p.likedBy || []);
+    const euCurti = curtidores.map(String).includes(String(meuId));
+    const numComentarios = (p.comentarios || []).length;
     return `<div class="post">
       <div class="post-head">${avatar(p.author,38)}<div class="who"><div class="n">${member(p.author).name}</div><div class="t">${esc(p.trip)} · ${esc(p.time)}</div></div>${svg('globe',16,'var(--sub)')}</div>
       ${p.foto
@@ -812,10 +898,10 @@ function renderMemories() {
         <p>${esc(p.text)}</p>
         <div class="post-tags">${p.tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>
         <div class="post-actions">
-          <button data-like="${p.id}" class="${isLiked?'liked':''}">${(isLiked?svgFill:svg)('heart',17,isLiked?C.clay:'currentColor')} ${p.likes + (isLiked?1:0)}</button>
-          <span>${svg('message',17)} ${p.comments}</span>
-          <span>${svg('share',17)}</span>
+          <button data-like="${p.id}" class="${euCurti?'liked':''}">${(euCurti?svgFill:svg)('heart',17,euCurti?C.clay:'currentColor')} ${curtidores.length}</button>
+          <button data-comment="${p.id}">${svg('message',17)} ${numComentarios}</button>
         </div>
+        ${numComentarios ? `<div class="post-comments">${(p.comentarios).map((c) => `<div class="cmt"><b>${esc(c.nome)}</b> ${esc(c.texto)}</div>`).join('')}</div>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -967,6 +1053,10 @@ function render() {
 function bindScreenEvents() {
   // Lista de viagens
   document.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => openTrip(b.dataset.open, true));
+  document.querySelectorAll('[data-open-card]').forEach((c) => c.onclick = (ev) => {
+    if (ev.target.closest('button')) return; // não interfere no botão Abrir
+    openTrip(c.dataset.openCard, true);
+  });
   const openCode = $('#open-code');
   if (openCode) openCode.onclick = () => openCodeModal();
   document.querySelectorAll('[data-join]').forEach((b) => b.onclick = async () => {
@@ -1004,8 +1094,9 @@ function bindScreenEvents() {
     ev.stopPropagation();
     openMapaModal(b.dataset.map);
   });
-  // Likes
-  document.querySelectorAll('[data-like]').forEach((b) => b.onclick = () => { const id = +b.dataset.like; liked[id] = !liked[id]; render(); });
+  // Likes e comentários (salvam na planilha)
+  document.querySelectorAll('[data-like]').forEach((b) => b.onclick = () => toggleLike(b.dataset.like));
+  document.querySelectorAll('[data-comment]').forEach((b) => b.onclick = () => openComentarioModal(b.dataset.comment));
   // Admin actions — só ligadas se o usuário logado for admin da viagem.
   // Participante não altera nada, mesmo que a tela apareça por algum motivo.
   if (meIsAdmin()) {
@@ -1419,7 +1510,7 @@ function openPostModal() {
       const temFoto = !!form.fotoDataUrl;
 
       // Publica o post já (com capa colorida enquanto a foto não chega).
-      const post = { id: postId, tripId: TRIP.id, author: meId(), time: 'agora', text: form.text.trim(), grad: form.grad, foto: '', likes: 0, comments: 0, tags, aguardandoFoto: temFoto };
+      const post = { id: postId, tripId: TRIP.id, author: meId(), time: 'agora', text: form.text.trim(), grad: form.grad, foto: '', likes: 0, likedBy: [], comments: 0, comentariosTexto: '', comentarios: [], tags, aguardandoFoto: temFoto };
       POSTS.unshift(post);
       SYNC.save('Memorias', post);
 
@@ -1535,6 +1626,11 @@ function init() {
   $('#bell-btn').innerHTML = svg('bell',17);
   $('#config-btn').innerHTML = svg('settings',17);
   $('#config-btn').onclick = () => { current = 'sync'; window.scrollTo(0,0); render(); };
+  const brandHome = $('#brand-home');
+  if (brandHome) brandHome.onclick = () => {
+    if (TRIP) { current = 'home'; } else { current = 'trips'; }
+    window.scrollTo(0,0); render();
+  };
 
   // Começa a carregar os dados JÁ (em paralelo com a splash), se logado e conectado.
   // Assim, quando a splash sai, as viagens normalmente já chegaram.
