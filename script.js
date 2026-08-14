@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-12-t';
+const APP_VERSION = '2026-08-14-a (fotos nas memórias)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -184,6 +184,23 @@ const SYNC = {
       return { ok: true };
     } catch (err) {
       console.error('Falha ao gravar na planilha:', err);
+      return { ok: false, error: String(err) };
+    }
+  },
+  // Upload de foto: precisa LER a resposta (o link do Drive).
+  // text/plain não dispara preflight CORS, então dá para ler o retorno.
+  async uploadFoto(dataUrl, nome) {
+    if (!this.url) return { ok: false, error: 'sem conexão' };
+    try {
+      const resp = await fetch(this.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'uploadFoto', dataUrl, nome }),
+      });
+      const data = await resp.json();
+      return data;
+    } catch (err) {
+      console.error('Falha no upload da foto:', err);
       return { ok: false, error: String(err) };
     }
   },
@@ -386,6 +403,30 @@ const $ = (sel) => document.querySelector(sel);
 const member = (id) => MEMBERS.find((m) => m.id === id) || PENDING.find((m) => m.id === id) || { id, name: 'Usuário', initials: '??', color: '#1E5AA8' };
 const meId = () => (AUTH.user ? AUTH.user.id : null);
 const meIsAdmin = () => { const m = MEMBERS.find((x) => x.id === meId()); return !!(m && m.admin); };
+
+// Lê um arquivo de imagem e devolve um data URL JPEG comprimido (máx ~1200px, qualidade 0.8).
+// Isso reduz uma foto de 3-5 MB para ~200-400 KB antes de enviar ao Drive.
+function comprimirImagem(file, maxLado = 1200, qualidade = 0.8) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > maxLado) { height = Math.round(height * maxLado / width); width = maxLado; }
+        else if (height > maxLado) { width = Math.round(width * maxLado / height); height = maxLado; }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', qualidade));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 // Pode editar/excluir um item se for o criador dele OU se for admin da viagem
 const podeEditar = (criadoPor) => meIsAdmin() || (criadoPor && String(criadoPor) === String(meId()));
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
@@ -684,7 +725,9 @@ function renderMemories() {
     const isLiked = liked[p.id];
     return `<div class="post">
       <div class="post-head">${avatar(p.author,38)}<div class="who"><div class="n">${member(p.author).name}</div><div class="t">${esc(p.trip)} · ${esc(p.time)}</div></div>${svg('globe',16,'var(--sub)')}</div>
-      <div class="post-cover" style="background:${p.grad}">${svg('camera',40)}</div>
+      ${p.foto
+        ? `<div class="post-cover post-cover-foto"><img src="${esc(p.foto)}" alt="foto da publicação" loading="lazy"></div>`
+        : `<div class="post-cover" style="background:${p.grad}">${svg('camera',40)}</div>`}
       <div class="post-body">
         <p>${esc(p.text)}</p>
         <div class="post-tags">${p.tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>
@@ -1138,15 +1181,19 @@ function openActivityModal(editItem, editDay) {
 }
 
 function openPostModal() {
-  let form = { text: '', tags: '', grad: GRADS[0] };
+  let form = { text: '', tags: '', grad: GRADS[0], fotoDataUrl: '', fotoNome: '' };
   function draw() {
     const covers = GRADS.map((g) => `<button class="cover-opt ${form.grad===g?'on':''}" data-grad="${g}" style="background:${g}"></button>`).join('');
+    const fotoBloco = form.fotoDataUrl
+      ? `<div class="foto-preview"><img src="${form.fotoDataUrl}" alt="prévia"><button class="foto-remove" id="foto-remove">${svg('x',16)} Remover foto</button></div>`
+      : `<label class="foto-pick" for="f-foto">${svg('camera',18)} Adicionar foto</label><input type="file" id="f-foto" accept="image/*" style="display:none">`;
     overlay().innerHTML = `<div class="modal">
       <div class="modal-grab"></div>
       <div class="modal-head"><h3 class="serif">Nova publicação</h3><button id="m-close">${svg('x',20)}</button></div>
       <div class="field-label">O que você quer compartilhar?</div><textarea class="field" id="f-text" rows="4" placeholder="Conte um momento da viagem...">${esc(form.text)}</textarea>
+      <div class="field-label mt14">Foto (opcional)</div>${fotoBloco}
       <div class="field-label mt14">Tags (separe por espaço)</div><input class="field" id="f-tags" placeholder="Paris RoadTrip Europa" value="${esc(form.tags)}">
-      <div class="field-label mt14">Capa</div><div class="cover-picker">${covers}</div>
+      <div class="field-label mt14">Capa ${form.fotoDataUrl?'(usada se não houver foto)':''}</div><div class="cover-picker">${covers}</div>
       <button class="primary-btn" id="m-save" ${form.text.trim()?'':'disabled'}>Publicar</button>
     </div>`;
     overlay().classList.remove('hidden');
@@ -1154,10 +1201,34 @@ function openPostModal() {
     $('#f-text').oninput = (e) => { form.text = e.target.value; $('#m-save').disabled = !form.text.trim(); };
     $('#f-tags').oninput = (e) => { form.tags = e.target.value; };
     document.querySelectorAll('[data-grad]').forEach((b) => b.onclick = () => { form.grad = b.dataset.grad; draw(); });
-    $('#m-save').onclick = () => {
+
+    const fotoInput = $('#f-foto');
+    if (fotoInput) fotoInput.onchange = async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        form.fotoDataUrl = await comprimirImagem(file);
+        form.fotoNome = file.name || ('foto_' + Date.now() + '.jpg');
+        draw();
+      } catch (err) { console.error('Erro ao processar foto:', err); alert('Não consegui processar essa imagem. Tente outra.'); }
+    };
+    const fotoRemove = $('#foto-remove');
+    if (fotoRemove) fotoRemove.onclick = () => { form.fotoDataUrl = ''; form.fotoNome = ''; draw(); };
+
+    $('#m-save').onclick = async () => {
       if (!form.text.trim()) return;
       const tags = form.tags.split(/[\s,]+/).filter(Boolean).map((t) => t.startsWith('#')?t:'#'+t);
-      const post = { id: Date.now(), tripId: TRIP.id, author: meId(), time: 'agora', text: form.text.trim(), grad: form.grad, likes: 0, comments: 0, tags };
+      const btn = $('#m-save');
+
+      let fotoUrl = '';
+      if (form.fotoDataUrl) {
+        btn.disabled = true; btn.textContent = 'Enviando foto...';
+        const r = await SYNC.uploadFoto(form.fotoDataUrl, form.fotoNome);
+        if (r && r.ok && r.url) fotoUrl = r.url;
+        else { btn.disabled = false; btn.textContent = 'Publicar'; alert('Não consegui enviar a foto. Publiquei sem ela? Tente de novo.'); return; }
+      }
+
+      const post = { id: Date.now(), tripId: TRIP.id, author: meId(), time: 'agora', text: form.text.trim(), grad: form.grad, foto: fotoUrl, likes: 0, comments: 0, tags };
       POSTS.unshift(post);
       SYNC.save('Memorias', post);
       closeModal(); render();
