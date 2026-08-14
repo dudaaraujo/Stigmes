@@ -199,7 +199,7 @@ button { font-family: inherit; }
 
 /* ---- Itinerary ---- */
 .search-wrap { position: relative; margin-bottom: 18px; }
-.search-wrap svg.ico { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--sub); width: 16px; height: 16px; }
+.search-wrap > svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--sub); width: 16px; height: 16px; pointer-events: none; }
 .search-wrap input {
   width: 100%; padding: 11px 13px 11px 38px; border-radius: 12px;
   border: 1px solid var(--border); background: var(--card); color: var(--text);
