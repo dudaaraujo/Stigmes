@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-s (ícone sem texto no topo)';
+const APP_VERSION = '2026-08-14-t (splash CSS anim)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 // Logo animada (SVG inline) para splash, login e topo
