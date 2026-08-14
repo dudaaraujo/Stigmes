@@ -145,6 +145,12 @@ button { font-family: inherit; }
 
 /* ---- Budget summary ---- */
 .budget-summary { border-radius: 18px; padding: 18px; }
+.saldo-big { font-size: 38px; font-weight: 700; line-height: 1.1; margin-top: 2px; }
+.budget-alert { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border-radius: 12px; margin: 12px 0; font-size: 13px; line-height: 1.5; }
+.budget-alert svg { flex-shrink: 0; margin-top: 1px; }
+.budget-alert.warn { background: rgba(212,175,55,.13); color: #8a6d1a; }
+.budget-alert.danger { background: rgba(181,101,74,.14); color: var(--clay); }
+body.dark .budget-alert.warn { color: #e8c65a; }
 .budget-summary .big {
   font-size: 30px; font-weight: 700; color: var(--blue); line-height: 1.1;
 }
