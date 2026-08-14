@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-t (splash CSS anim)';
+const APP_VERSION = '2026-08-14-u (splash espera viagens)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 // Logo animada (SVG inline) para splash, login e topo
@@ -1723,19 +1723,41 @@ function init() {
     preload = SYNC.load().then((ok) => { if (ok) AUTH.ensureMember(); return ok; });
   }
 
-  // splash → depois decide entre login e app
   const splash = $('#splash');
-  setTimeout(() => splash.classList.add('leaving'), 1200);
-  setTimeout(() => {
-    splash.classList.add('gone');
-    try {
-      if (AUTH.user) enterApp(preload);
-      else showLogin();
-    } catch (err) {
-      console.error('Falha ao inicializar login:', err);
-      forceGuestFallback('Ocorreu um erro ao iniciar o login.');
-    }
-  }, 2500);
+
+  // Sai do splash e entra no app/login
+  const sairDoSplash = () => {
+    if (splash.classList.contains('leaving') || splash.classList.contains('gone')) return;
+    splash.classList.add('leaving');
+    setTimeout(() => {
+      splash.classList.add('gone');
+      try {
+        if (AUTH.user) enterApp(preload);
+        else showLogin();
+      } catch (err) {
+        console.error('Falha ao inicializar login:', err);
+        forceGuestFallback('Ocorreu um erro ao iniciar o login.');
+      }
+    }, 500);
+  };
+
+  const TEMPO_MIN = 1200;   // splash aparece pelo menos este tempo (pra não piscar)
+  const TEMPO_MAX = 8000;   // limite: não trava o splash se a rede estiver lenta
+
+  if (preload) {
+    // Espera as viagens carregarem (respeitando o tempo mínimo), com teto de segurança
+    const inicio = Date.now();
+    let saiu = false;
+    const teto = setTimeout(() => { if (!saiu) { saiu = true; sairDoSplash(); } }, TEMPO_MAX);
+    preload.finally(() => {
+      const decorrido = Date.now() - inicio;
+      const espera = Math.max(0, TEMPO_MIN - decorrido);
+      setTimeout(() => { if (!saiu) { saiu = true; clearTimeout(teto); sairDoSplash(); } }, espera);
+    });
+  } else {
+    // Sem viagens pra carregar (não logado): tempo fixo curto
+    setTimeout(sairDoSplash, TEMPO_MIN);
+  }
 }
 
 // Garante que o usuário nunca fique preso: mostra login com opção de convidado
