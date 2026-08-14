@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-k (social + navegação)';
+const APP_VERSION = '2026-08-14-m (feed + contagem viagem)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -77,13 +77,32 @@ const AUTH = {
 
 /* ---- Sincronização com Google Sheets (via Apps Script) ---- */
 const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbzt3ePy6d49gxtDARqgJYdmVaHenRSh9zAkHqwZinlBuFpA9y6vfmZ7iK57BPhSWCepjg/exec';
+// Normaliza qualquer formato de data para AAAA-MM-DD (que o input type=date entende).
+// O Sheets às vezes devolve a data como ISO completa ou "Mon Aug 18 2026...".
+function fmtDateInput(v) {
+  if (!v) return '';
+  const s = String(v).trim();
+  // já está no formato certo
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // formato brasileiro dd/mm/aaaa
+  const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (br) return `${br[3]}-${br[2].padStart(2,'0')}-${br[1].padStart(2,'0')}`;
+  // qualquer coisa que o Date entenda (ISO, "Mon Aug 18 2026", etc)
+  const d = new Date(s);
+  if (!isNaN(d)) {
+    const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${dd}`;
+  }
+  return '';
+}
+
 // Converte uma linha da aba Viagens no objeto usado pelo app
 function mapTrip(v) {
   return {
     id: String(v.id),
     name: v.nome || 'Viagem',
     destination: v.destino || '',
-    start: v.inicio || '', end: v.fim || '',
+    start: fmtDateInput(v.inicio), end: fmtDateInput(v.fim),
     budget: Number(v.orcamento) || 0,
     currency: v.moeda || '€',
     criadaPor: v.criadaPor || '',
@@ -302,7 +321,8 @@ function openTrip(tripId, goToHome) {
       tags: Array.isArray(p.tags) ? p.tags : [],
       likedBy: Array.isArray(p.likedBy) ? p.likedBy : (p.likedBy ? String(p.likedBy).split(',').filter(Boolean) : []),
       comentarios: parseComentarios(p.comentariosTexto),
-    }));
+    }))
+    .sort((a, b) => Number(b.id) - Number(a.id)); // mais recente primeiro
 
   if (goToHome) { current = 'home'; window.scrollTo(0, 0); render(); }
 }
@@ -595,19 +615,49 @@ function renderTrips() {
 // ============================================================
 // RENDER: Dashboard
 // ============================================================
+// Decide o texto do hero conforme a viagem esteja por vir, em andamento ou concluída
+function statusViagem() {
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const inicio = TRIP.start ? new Date(TRIP.start) : null;
+  const fim = TRIP.end ? new Date(TRIP.end) : null;
+  if (inicio) inicio.setHours(0,0,0,0);
+  if (fim) fim.setHours(0,0,0,0);
+
+  // Sem data de início definida
+  if (!inicio) return { kicker: 'Sua viagem', num: '', lbl: 'defina as datas no Admin' };
+
+  // Ainda vai começar
+  if (hoje < inicio) {
+    const dias = Math.ceil((inicio - hoje) / 86400000);
+    return { kicker: 'Sua próxima viagem', num: dias, lbl: dias === 1 ? 'dia até a partida' : 'dias até a partida' };
+  }
+
+  // Já terminou
+  if (fim && hoje > fim) {
+    return { kicker: 'Relembre os momentos', num: '', lbl: 'Viagem concluída ✓' };
+  }
+
+  // Em andamento: dia X de N
+  const totalDias = fim ? Math.round((fim - inicio) / 86400000) + 1 : null;
+  const diaAtual = Math.round((hoje - inicio) / 86400000) + 1;
+  if (totalDias) return { kicker: 'Você está na viagem!', num: diaAtual, lbl: `de ${totalDias} dias de viagem` };
+  return { kicker: 'Você está na viagem!', num: diaAtual, lbl: `º dia de viagem` };
+}
+
 function renderDashboard() {
   if (!TRIP) return renderTrips();
   const spent = EXPENSES.reduce((s,e) => s+e.amount, 0);
   const orc = TRIP.budget || 0;
   const restante = orc - spent;
   const pct = orc ? Math.round((spent / orc) * 100) : 0;
+  const sv = statusViagem();
   return `
     <div class="hero">
       <button class="hero-back" id="hero-back">${svg('chevronright',18,'#fff')}<span>Trocar viagem</span></button>
-      <div class="kicker">Sua próxima viagem</div>
+      <div class="kicker">${sv.kicker}</div>
       <h1 class="serif">${esc(TRIP.name)}</h1>
       <div class="dest">${svg('mappin',14)} ${esc(TRIP.destination)}</div>
-      <div class="count"><span class="num serif">${daysUntil(TRIP.start)}</span><span class="lbl">dias até a partida</span></div>
+      <div class="count">${sv.num !== '' ? `<span class="num serif">${sv.num}</span>` : ''}<span class="lbl">${sv.lbl}</span></div>
       <div class="plane">${svg('plane',120,'#fff')}</div>
     </div>
     ${nextActivityCard()}
@@ -1623,7 +1673,6 @@ function init() {
     $('#toggle-dark').innerHTML = svg(dark ? 'sun' : 'moon', 17);
   };
   $('#toggle-dark').innerHTML = svg('moon',17);
-  $('#bell-btn').innerHTML = svg('bell',17);
   $('#config-btn').innerHTML = svg('settings',17);
   $('#config-btn').onclick = () => { current = 'sync'; window.scrollTo(0,0); render(); };
   const brandHome = $('#brand-home');
