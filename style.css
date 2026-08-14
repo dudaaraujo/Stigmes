@@ -251,6 +251,8 @@ button { font-family: inherit; }
 .post-cover { height: 200px; position: relative; }
 .post-cover svg { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: rgba(255,255,255,.35); width: 40px; height: 40px; }
 .post-cover-foto { height: auto; background: var(--input-bg); }
+.foto-loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; color: rgba(255,255,255,.9); font-size: 13px; font-weight: 600; }
+.foto-loading .spinner { border-color: rgba(255,255,255,.4); border-top-color: #fff; }
 .post-cover-foto img { width: 100%; max-height: 420px; object-fit: cover; display: block; }
 /* Seletor de foto no modal */
 .foto-pick { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 6px; padding: 14px; border: 1.5px dashed var(--border); border-radius: 12px; color: var(--blue); font-weight: 600; font-size: 14px; cursor: pointer; }
