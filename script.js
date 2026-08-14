@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-o (logo unificada)';
+const APP_VERSION = '2026-08-14-p (custo no roteiro)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -867,9 +867,13 @@ function renderItinerary() {
       ${itinQuery ? `<button class="clear" id="itin-clear">${svg('x',16)}</button>` : ''}
     </div>` : '';
 
+  const btnCusto = ITINERARY.length > 0 ? `
+    <button class="roteiro-custo-btn" id="itin-custo">${svg('wallet',16)} Ver custo do roteiro</button>` : '';
+
   return `
     <h2 class="section-title serif">Cronograma diário</h2>
     ${searchBar}
+    ${btnCusto}
     ${empty}${daysHtml}`;
 }
 
@@ -1010,11 +1014,6 @@ function renderAdmin() {
       ${members}
     </div>
     <div class="card admin-block">
-      <div class="mini-label admin-title" style="margin-bottom:10px">${svg('calendar',14)} Custo do roteiro</div>
-      <div style="font-size:12.5px;color:var(--sub);margin-bottom:12px">Veja o total estimado das atividades planejadas, por categoria, comparado ao orçamento.</div>
-      <button class="primary-btn" id="adm-roteiro-resumo" style="background:var(--teal)">Ver resumo do roteiro</button>
-    </div>
-    <div class="card admin-block">
       <div class="mini-label admin-title" style="margin-bottom:6px">${svg('wallet',14)} Orçamento por categoria</div>
       <div style="font-size:12.5px;color:var(--sub);margin-bottom:12px">Defina um limite para cada tipo de gasto da viagem (opcional). Deixe 0 para não limitar.</div>
       ${Object.keys(CATEGORIES).map((k) => {
@@ -1131,6 +1130,8 @@ function bindScreenEvents() {
   if (s) s.oninput = (e) => { itinQuery = e.target.value; const pos = e.target.selectionStart; render(); const n = $('#itin-search'); if (n) { n.focus(); n.setSelectionRange(pos,pos); } };
   const clr = $('#itin-clear');
   if (clr) clr.onclick = () => { itinQuery = ''; render(); };
+  const custoBtn = $('#itin-custo');
+  if (custoBtn) custoBtn.onclick = () => openRoteiroResumo();
   document.querySelectorAll('[data-day]').forEach((b) => b.onclick = () => { const d = +b.dataset.day; dayOpen[d] = !dayOpen[d]; render(); });
   document.querySelectorAll('[data-edit-id]').forEach((b) => b.onclick = () => {
     const dayNum = +b.dataset.editDay;
@@ -1187,8 +1188,6 @@ function bindScreenEvents() {
     SYNC.update('Viagens', TRIP.id, { nome: TRIP.name, destino: TRIP.destination, inicio: TRIP.start, fim: TRIP.end, orcamento: TRIP.budget });
     save.textContent = 'Salvo ✓'; setTimeout(() => { save.textContent = 'Salvar alterações'; }, 1500);
   };
-  const roteiroResumo = $('#adm-roteiro-resumo');
-  if (roteiroResumo) roteiroResumo.onclick = () => openRoteiroResumo();
   const saveCat = $('#adm-save-cat');
   if (saveCat) saveCat.onclick = () => {
     if (!TRIP.orcCat) TRIP.orcCat = {};
