@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-g (busca sem acento)';
+const APP_VERSION = '2026-08-14-h (orçamentos + alertas)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -77,6 +77,26 @@ const AUTH = {
 
 /* ---- Sincronização com Google Sheets (via Apps Script) ---- */
 const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbzt3ePy6d49gxtDARqgJYdmVaHenRSh9zAkHqwZinlBuFpA9y6vfmZ7iK57BPhSWCepjg/exec';
+// Converte uma linha da aba Viagens no objeto usado pelo app
+function mapTrip(v) {
+  return {
+    id: String(v.id),
+    name: v.nome || 'Viagem',
+    destination: v.destino || '',
+    start: v.inicio || '', end: v.fim || '',
+    budget: Number(v.orcamento) || 0,
+    currency: v.moeda || '€',
+    criadaPor: v.criadaPor || '',
+    orcCat: {
+      transporte:  Number(v.orcTransporte)  || 0,
+      hospedagem:  Number(v.orcHospedagem)  || 0,
+      alimentacao: Number(v.orcAlimentacao) || 0,
+      passeios:    Number(v.orcPasseios)    || 0,
+      outros:      Number(v.orcOutros)      || 0,
+    },
+  };
+}
+
 const SYNC = {
   get url() { return localStorage.getItem('stigmes_sheet_url') || DEFAULT_SHEET_URL; },
   set url(v) { localStorage.setItem('stigmes_sheet_url', v || ''); },
@@ -93,11 +113,7 @@ const SYNC = {
     try {
       const data = await this.jsonp(this.url);
       ALL = data;
-      TRIPS = (data.Viagens || []).map((v) => ({
-        id: String(v.id), name: v.nome || 'Viagem', destination: v.destino || '',
-        start: v.inicio || '', end: v.fim || '', budget: Number(v.orcamento) || 0,
-        currency: v.moeda || '€', criadaPor: v.criadaPor || '',
-      }));
+      TRIPS = (data.Viagens || []).map(mapTrip);
       if (TRIP) openTrip(TRIP.id, false);
       this.status = 'ok';
       render();
@@ -119,15 +135,7 @@ const SYNC = {
       const data = await this.jsonp(this.url);
       ALL = data;
       // Lista de viagens
-      TRIPS = (data.Viagens || []).map((v) => ({
-        id: String(v.id),
-        name: v.nome || 'Viagem',
-        destination: v.destino || '',
-        start: v.inicio || '', end: v.fim || '',
-        budget: Number(v.orcamento) || 0,
-        currency: v.moeda || '€',
-        criadaPor: v.criadaPor || '',
-      }));
+      TRIPS = (data.Viagens || []).map(mapTrip);
       // Se já havia uma viagem aberta, recarrega os dados dela
       if (TRIP) openTrip(TRIP.id, false);
       this.status = 'ok';
@@ -333,6 +341,7 @@ const ICON = {
   clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   navigation: '<polygon points="3 11 22 2 13 21 11 13 3 11"/>',
+  alert: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
   sun: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
   mappin: '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
@@ -440,6 +449,42 @@ function daysUntil(date) {
   return diff > 0 ? diff : 0;
 }
 
+// Gera um alerta se o orçamento está acabando.
+// Duas situações: (a) já gastou 80%+; (b) o que resta não cobre os dias que faltam.
+function alertaBudget(gasto, orcamento) {
+  if (!orcamento || orcamento <= 0) return '';
+  const restante = orcamento - gasto;
+  const pct = gasto / orcamento;
+  const cur = TRIP.currency;
+
+  // Dias restantes até o fim da viagem (se houver data de fim futura)
+  let diasRestantes = 0;
+  if (TRIP.end) diasRestantes = daysUntil(TRIP.end);
+
+  const avisos = [];
+  // Situação A: estourou
+  if (restante < 0) {
+    return `<div class="budget-alert danger">${svg('alert',18)}<div>Orçamento estourado em <b>${cur}${Math.abs(restante).toLocaleString('pt-BR')}</b>. Cuidado com novos gastos.</div></div>`;
+  }
+  // Situação B: gastou 80%+
+  if (pct >= 0.8) {
+    avisos.push(`Você já usou <b>${Math.round(pct*100)}%</b> do orçamento — restam só <b>${cur}${restante.toLocaleString('pt-BR')}</b>.`);
+  }
+  // Situação C: o restante não cobre os dias que faltam (menos de ~um valor/dia saudável)
+  if (diasRestantes > 0 && restante > 0) {
+    const porDia = restante / diasRestantes;
+    const gastoMedioDia = gasto > 0 ? (gasto / Math.max(1, (TRIP.totalDias || diasRestantes))) : 0;
+    // se o que sobra por dia é bem menor que o ritmo de gasto, alerta
+    if (gastoMedioDia > 0 && porDia < gastoMedioDia * 0.7) {
+      avisos.push(`Faltam <b>${diasRestantes} dias</b> e sobram <b>${cur}${restante.toLocaleString('pt-BR')}</b> (${cur}${porDia.toFixed(0)}/dia). Pode não ser suficiente no ritmo atual.`);
+    }
+  }
+
+  if (avisos.length === 0) return '';
+  const nivel = pct >= 0.9 ? 'danger' : 'warn';
+  return `<div class="budget-alert ${nivel}">${svg('alert',18)}<div>${avisos.join('<br>')}</div></div>`;
+}
+
 function avatar(id, size) {
   const m = member(id); const s = size || 32;
   return `<div class="avatar" style="width:${s}px;height:${s}px;background:${m.color};font-size:${s*0.36}px">${m.initials}</div>`;
@@ -513,7 +558,6 @@ function renderTrips() {
     : '';
 
   return `
-    <div class="eyebrow">Suas viagens</div>
     <h2 class="section-title serif">Para onde vamos?</h2>
     ${semPlanilha}
     ${codeEntry}
@@ -527,7 +571,9 @@ function renderTrips() {
 function renderDashboard() {
   if (!TRIP) return renderTrips();
   const spent = EXPENSES.reduce((s,e) => s+e.amount, 0);
-  const pct = TRIP.budget ? Math.round((spent / TRIP.budget) * 100) : 0;
+  const orc = TRIP.budget || 0;
+  const restante = orc - spent;
+  const pct = orc ? Math.round((spent / orc) * 100) : 0;
   return `
     <div class="hero">
       <button class="hero-back" id="hero-back">${svg('chevronright',18,'#fff')}<span>Trocar viagem</span></button>
@@ -538,10 +584,17 @@ function renderDashboard() {
       <div class="plane">${svg('plane',120,'#fff')}</div>
     </div>
     ${nextActivityCard()}
+    ${alertaBudget(spent, orc)}
     <div class="card" style="margin-top:12px">
-      <div class="row-between"><span style="font-size:13px;color:var(--sub)">Orçamento consumido</span><span style="font-weight:700;color:${pct>80?C.gold:C.blue}">${pct}%</span></div>
-      <div class="track"><div class="fill" style="width:${Math.min(pct,100)}%"></div></div>
-      <div class="row-between" style="margin-top:10px;font-size:13px"><span>Gasto <b>${TRIP.currency}${spent}</b></span><span style="color:var(--sub)">de ${TRIP.currency}${TRIP.budget||0}</span></div>
+      <div style="text-align:center;padding:2px 0">
+        <div style="font-size:12px;color:var(--sub)">${restante>=0?'Saldo restante':'Acima do orçamento'}</div>
+        <div class="saldo-big serif" style="color:${restante>=0?C.teal:C.clay}">${TRIP.currency}${Math.abs(restante).toLocaleString('pt-BR')}</div>
+      </div>
+      <div class="track" style="margin-top:6px"><div class="fill" style="width:${Math.min(pct,100)}%"></div></div>
+      <div class="row-between" style="margin-top:12px;font-size:13px">
+        <span style="color:var(--sub)">Gasto <b style="color:var(--text)">${TRIP.currency}${spent.toLocaleString('pt-BR')}</b></span>
+        <span style="color:var(--sub)">Orçamento ${TRIP.currency}${orc.toLocaleString('pt-BR')}</span>
+      </div>
     </div>`;
 }
 
@@ -565,7 +618,7 @@ function nextActivityCard() {
 // ============================================================
 // RENDER: Budget
 // ============================================================
-let budgetTab = 'gastos';
+let budgetTab = 'meu';
 function renderBudget() {
   const total = EXPENSES.reduce((s,e) => s+e.amount, 0);
   const pct = TRIP.budget ? Math.round((total / TRIP.budget) * 100) : 0;
@@ -584,10 +637,26 @@ function renderBudget() {
     </div>`;
   }).join('');
 
-  const cats = Object.entries(byCat).map(([k,v]) => {
-    const cat = CATEGORIES[k]; const p = Math.round((v/total)*100);
+  const orcCat = TRIP.orcCat || {};
+  const temOrcCat = Object.values(orcCat).some((x) => x > 0);
+  const cats = Object.keys(CATEGORIES).map((k) => {
+    const cat = CATEGORIES[k];
+    const gasto = byCat[k] || 0;
+    const limite = orcCat[k] || 0;
+    if (gasto === 0 && limite === 0) return ''; // pula categoria sem gasto nem orçamento
+    if (limite > 0) {
+      const p = Math.round((gasto/limite)*100);
+      const estourou = gasto > limite;
+      return `<div class="catbar">
+        <div class="top"><span class="l">${svg(cat.icon,15,cat.color)} ${cat.label}</span><span><b style="color:${estourou?C.clay:'var(--text)'}">${TRIP.currency}${gasto.toLocaleString('pt-BR')}</b> <span style="color:var(--sub)">de ${TRIP.currency}${limite.toLocaleString('pt-BR')}</span></span></div>
+        <div class="bar"><span style="width:${Math.min(p,100)}%;background:${estourou?C.clay:cat.color}"></span></div>
+        <div style="font-size:11.5px;color:${estourou?C.clay:'var(--sub)'};margin-top:3px">${estourou?`Estourou ${TRIP.currency}${(gasto-limite).toLocaleString('pt-BR')}`:`${p}% · restam ${TRIP.currency}${(limite-gasto).toLocaleString('pt-BR')}`}</div>
+      </div>`;
+    }
+    // sem limite definido: comportamento antigo (% do total gasto)
+    const p = total>0 ? Math.round((gasto/total)*100) : 0;
     return `<div class="catbar">
-      <div class="top"><span class="l">${svg(cat.icon,15,cat.color)} ${cat.label}</span><span><b>${TRIP.currency}${v}</b> <span style="color:var(--sub)">· ${p}%</span></span></div>
+      <div class="top"><span class="l">${svg(cat.icon,15,cat.color)} ${cat.label}</span><span><b>${TRIP.currency}${gasto.toLocaleString('pt-BR')}</b> <span style="color:var(--sub)">· ${p}%</span></span></div>
       <div class="bar"><span style="width:${p}%;background:${cat.color}"></span></div>
     </div>`;
   }).join('');
@@ -624,15 +693,16 @@ function renderBudget() {
     }).join('') : `<div class="empty">Você ainda não entrou em nenhuma despesa.</div>`;
 
     const semOrc = meuOrc === 0
-      ? `<div style="font-size:12.5px;color:var(--sub);margin-top:8px">Seu orçamento pessoal ainda não foi definido. Peça a um admin para configurá-lo na tela Admin.</div>`
-      : `<div class="track"><div class="fill" style="width:${Math.min(pctMeu,100)}%"></div></div>
-         <div class="row-between" style="margin-top:10px;font-size:12.5px"><span style="color:var(--sub)">${pctMeu}% consumido</span><span style="color:${sobra>=0?C.teal:C.clay};font-weight:600">${sobra>=0?'Ainda sobra ':'Estourou '}${TRIP.currency}${Math.abs(sobra).toFixed(2)}</span></div>`;
+      ? `<div style="font-size:12.5px;color:var(--sub);margin-top:8px;text-align:center">Seu orçamento pessoal ainda não foi definido. Peça a um admin para configurá-lo na tela Admin.</div>`
+      : `<div class="track" style="margin-top:6px"><div class="fill" style="width:${Math.min(pctMeu,100)}%"></div></div>
+         <div class="row-between" style="margin-top:12px;font-size:13px"><span style="color:var(--sub)">Gasto <b style="color:var(--text)">${TRIP.currency}${consumido.toFixed(2)}</b></span><span style="color:var(--sub)">de ${TRIP.currency}${meuOrc.toLocaleString('pt-BR')} · ${pctMeu}%</span></div>`;
 
     meuPane = `
+      ${meuOrc>0 ? alertaBudget(consumido, meuOrc) : ''}
       <div class="card budget-summary">
-        <div class="row-between" style="align-items:flex-end">
-          <div><div style="font-size:12px;color:var(--sub)">Gasto por mim</div><div class="big serif">${TRIP.currency}${consumido.toFixed(2)}</div></div>
-          <div style="text-align:right"><div style="font-size:12px;color:var(--sub)">Meu orçamento</div><div class="total serif">${TRIP.currency}${meuOrc.toLocaleString('pt-BR')}</div></div>
+        <div style="text-align:center;padding:4px 0 2px">
+          <div style="font-size:12px;color:var(--sub)">${meuOrc>0 ? (sobra>=0?'Ainda sobra':'Você estourou') : 'Gasto por mim'}</div>
+          <div class="saldo-big serif" style="color:${meuOrc===0?C.blue:(sobra>=0?C.teal:C.clay)}">${TRIP.currency}${meuOrc>0 ? Math.abs(sobra).toFixed(2) : consumido.toFixed(2)}</div>
         </div>
         ${semOrc}
       </div>
@@ -641,15 +711,18 @@ function renderBudget() {
   }
 
   return `
-    <div class="eyebrow">Módulo financeiro</div>
     <h2 class="section-title serif">Orçamento &amp; Despesas</h2>
+    ${alertaBudget(total, TRIP.budget||0)}
     <div class="card budget-summary">
-      <div class="row-between" style="align-items:flex-end">
-        <div><div style="font-size:12px;color:var(--sub)">Consumido</div><div class="big serif">${TRIP.currency}${total.toLocaleString('pt-BR')}</div></div>
-        <div style="text-align:right"><div style="font-size:12px;color:var(--sub)">Orçamento total</div><div class="total serif">${TRIP.currency}${(TRIP.budget||0).toLocaleString('pt-BR')}</div></div>
+      <div style="text-align:center;padding:4px 0 2px">
+        <div style="font-size:12px;color:var(--sub)">${remaining>=0?'Saldo restante':'Acima do orçamento'}</div>
+        <div class="saldo-big serif" style="color:${remaining>=0?C.teal:C.clay}">${TRIP.currency}${Math.abs(remaining).toLocaleString('pt-BR')}</div>
       </div>
-      <div class="track"><div class="fill" style="width:${Math.min(pct,100)}%"></div></div>
-      <div class="row-between" style="margin-top:10px;font-size:12.5px"><span style="color:var(--sub)">${pct}% consumido</span><span style="color:${remaining>=0?C.teal:C.clay};font-weight:600">${remaining>=0?'Saldo restante ':'Acima do orçamento '}${TRIP.currency}${Math.abs(remaining).toLocaleString('pt-BR')}</span></div>
+      <div class="track" style="margin-top:6px"><div class="fill" style="width:${Math.min(pct,100)}%"></div></div>
+      <div class="row-between" style="margin-top:12px;font-size:13px">
+        <span style="color:var(--sub)">Gasto <b style="color:var(--text)">${TRIP.currency}${total.toLocaleString('pt-BR')}</b></span>
+        <span style="color:var(--sub)">de ${TRIP.currency}${(TRIP.budget||0).toLocaleString('pt-BR')} · ${pct}%</span>
+      </div>
     </div>
     <div class="tabs">
       <button class="tab ${budgetTab==='meu'?'active':''}" data-btab="meu">Meu</button>
@@ -753,7 +826,7 @@ function renderMemories() {
         <div>Compartilhe os momentos da viagem! Toque no <b>+</b> para publicar uma foto e escrever algo sobre ela.</div>
       </div>`
     : '';
-  return `<div class="eyebrow">Feed social</div><h2 class="section-title serif">Memórias</h2>${posts}${vazio}`;
+  return `<h2 class="section-title serif">Memórias</h2>${posts}${vazio}`;
 }
 
 // ============================================================
@@ -783,7 +856,6 @@ function renderAdmin() {
   </div>`).join('');
 
   return `
-    <div class="eyebrow">Administração da viagem</div>
     <h2 class="section-title serif">Painel do admin</h2>
     <div class="card admin-block">
       <div class="mini-label admin-title" style="margin-bottom:14px">${svg('bell',14)} Aprovações pendentes ${PENDING.length?`<span class="badge-count">${PENDING.length}</span>`:''}</div>
@@ -800,6 +872,19 @@ function renderAdmin() {
     <div class="card admin-block">
       <div class="mini-label admin-title" style="margin-bottom:14px">${svg('users',14)} Participantes</div>
       ${members}
+    </div>
+    <div class="card admin-block">
+      <div class="mini-label admin-title" style="margin-bottom:6px">${svg('wallet',14)} Orçamento por categoria</div>
+      <div style="font-size:12.5px;color:var(--sub);margin-bottom:12px">Defina um limite para cada tipo de gasto da viagem (opcional). Deixe 0 para não limitar.</div>
+      ${Object.keys(CATEGORIES).map((k) => {
+        const cat = CATEGORIES[k];
+        const val = (TRIP.orcCat && TRIP.orcCat[k]) || '';
+        return `<div class="member-budget" style="padding-left:0">
+          <span class="lbl">${svg(cat.icon,14,cat.color)} ${cat.label}</span>
+          <input class="budget-input" type="number" min="0" placeholder="0" value="${val}" data-orccat="${k}">
+        </div>`;
+      }).join('')}
+      <button class="primary-btn" id="adm-save-cat" style="margin-top:14px">Salvar orçamentos por categoria</button>
     </div>
     <div class="card admin-block">
       <div class="mini-label admin-title" style="margin-bottom:14px">${svg('settings',14)} Dados da viagem</div>
@@ -834,7 +919,6 @@ function renderSync() {
       <button class="primary-btn" id="logout-btn" style="background:var(--clay)">Sair da conta</button>
     </div>` : '';
   return `
-    <div class="eyebrow">Integração</div>
     <h2 class="section-title serif">Planilha &amp; conta</h2>
     ${accountBlock}
     <div class="card">
@@ -956,6 +1040,16 @@ function bindScreenEvents() {
     TRIP.start = $('#adm-start').value; TRIP.end = $('#adm-end').value; TRIP.budget = +$('#adm-budget').value;
     SYNC.update('Viagens', TRIP.id, { nome: TRIP.name, destino: TRIP.destination, inicio: TRIP.start, fim: TRIP.end, orcamento: TRIP.budget });
     save.textContent = 'Salvo ✓'; setTimeout(() => { save.textContent = 'Salvar alterações'; }, 1500);
+  };
+  const saveCat = $('#adm-save-cat');
+  if (saveCat) saveCat.onclick = () => {
+    if (!TRIP.orcCat) TRIP.orcCat = {};
+    document.querySelectorAll('[data-orccat]').forEach((inp) => { TRIP.orcCat[inp.dataset.orccat] = Number(inp.value) || 0; });
+    SYNC.update('Viagens', TRIP.id, {
+      orcTransporte: TRIP.orcCat.transporte, orcHospedagem: TRIP.orcCat.hospedagem,
+      orcAlimentacao: TRIP.orcCat.alimentacao, orcPasseios: TRIP.orcCat.passeios, orcOutros: TRIP.orcCat.outros,
+    });
+    saveCat.textContent = 'Salvo ✓'; setTimeout(() => { saveCat.textContent = 'Salvar orçamentos por categoria'; }, 1500);
   };
   }
   // Sync screen
