@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-a (fotos nas memórias)';
+const APP_VERSION = '2026-08-14-b (fotos via no-cors)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -187,18 +187,19 @@ const SYNC = {
       return { ok: false, error: String(err) };
     }
   },
-  // Upload de foto: precisa LER a resposta (o link do Drive).
-  // text/plain não dispara preflight CORS, então dá para ler o retorno.
-  async uploadFoto(dataUrl, nome) {
+  // Upload de foto: envia via no-cors (sempre funciona, sem bloqueio CORS).
+  // O Apps Script salva no Drive e grava o link na linha do post (postId).
+  // O app pega o link na próxima sincronização automática.
+  async uploadFoto(dataUrl, nome, postId) {
     if (!this.url) return { ok: false, error: 'sem conexão' };
     try {
-      const resp = await fetch(this.url, {
+      await fetch(this.url, {
         method: 'POST',
+        mode: 'no-cors',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'uploadFoto', dataUrl, nome }),
+        body: JSON.stringify({ action: 'uploadFoto', dataUrl, nome, postId }),
       });
-      const data = await resp.json();
-      return data;
+      return { ok: true };
     } catch (err) {
       console.error('Falha no upload da foto:', err);
       return { ok: false, error: String(err) };
@@ -1219,18 +1220,19 @@ function openPostModal() {
       if (!form.text.trim()) return;
       const tags = form.tags.split(/[\s,]+/).filter(Boolean).map((t) => t.startsWith('#')?t:'#'+t);
       const btn = $('#m-save');
+      const postId = Date.now();
 
-      let fotoUrl = '';
-      if (form.fotoDataUrl) {
-        btn.disabled = true; btn.textContent = 'Enviando foto...';
-        const r = await SYNC.uploadFoto(form.fotoDataUrl, form.fotoNome);
-        if (r && r.ok && r.url) fotoUrl = r.url;
-        else { btn.disabled = false; btn.textContent = 'Publicar'; alert('Não consegui enviar a foto. Publiquei sem ela? Tente de novo.'); return; }
-      }
-
-      const post = { id: Date.now(), tripId: TRIP.id, author: meId(), time: 'agora', text: form.text.trim(), grad: form.grad, foto: fotoUrl, likes: 0, comments: 0, tags };
+      // Publica o post já (com capa colorida). Se houver foto, ela aparece
+      // sozinha em até 1 min, quando o Apps Script terminar de salvá-la.
+      const post = { id: postId, tripId: TRIP.id, author: meId(), time: 'agora', text: form.text.trim(), grad: form.grad, foto: '', likes: 0, comments: 0, tags };
       POSTS.unshift(post);
       SYNC.save('Memorias', post);
+
+      if (form.fotoDataUrl) {
+        btn.disabled = true; btn.textContent = 'Enviando foto...';
+        await SYNC.uploadFoto(form.fotoDataUrl, form.fotoNome, postId);
+        // não espera o link: ele chega na próxima sincronização
+      }
       closeModal(); render();
     };
   }
