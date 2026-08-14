@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-b (fotos via no-cors)';
+const APP_VERSION = '2026-08-14-c (foto aparece sozinha)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -728,7 +728,9 @@ function renderMemories() {
       <div class="post-head">${avatar(p.author,38)}<div class="who"><div class="n">${member(p.author).name}</div><div class="t">${esc(p.trip)} · ${esc(p.time)}</div></div>${svg('globe',16,'var(--sub)')}</div>
       ${p.foto
         ? `<div class="post-cover post-cover-foto"><img src="${esc(p.foto)}" alt="foto da publicação" loading="lazy"></div>`
-        : `<div class="post-cover" style="background:${p.grad}">${svg('camera',40)}</div>`}
+        : p.aguardandoFoto
+          ? `<div class="post-cover" style="background:${p.grad}"><div class="foto-loading"><div class="spinner"></div>Enviando foto...</div></div>`
+          : `<div class="post-cover" style="background:${p.grad}">${svg('camera',40)}</div>`}
       <div class="post-body">
         <p>${esc(p.text)}</p>
         <div class="post-tags">${p.tags.map((t) => `<span>${esc(t)}</span>`).join('')}</div>
@@ -1221,22 +1223,50 @@ function openPostModal() {
       const tags = form.tags.split(/[\s,]+/).filter(Boolean).map((t) => t.startsWith('#')?t:'#'+t);
       const btn = $('#m-save');
       const postId = Date.now();
+      const temFoto = !!form.fotoDataUrl;
 
-      // Publica o post já (com capa colorida). Se houver foto, ela aparece
-      // sozinha em até 1 min, quando o Apps Script terminar de salvá-la.
-      const post = { id: postId, tripId: TRIP.id, author: meId(), time: 'agora', text: form.text.trim(), grad: form.grad, foto: '', likes: 0, comments: 0, tags };
+      // Publica o post já (com capa colorida enquanto a foto não chega).
+      const post = { id: postId, tripId: TRIP.id, author: meId(), time: 'agora', text: form.text.trim(), grad: form.grad, foto: '', likes: 0, comments: 0, tags, aguardandoFoto: temFoto };
       POSTS.unshift(post);
       SYNC.save('Memorias', post);
 
-      if (form.fotoDataUrl) {
+      if (temFoto) {
         btn.disabled = true; btn.textContent = 'Enviando foto...';
         await SYNC.uploadFoto(form.fotoDataUrl, form.fotoNome, postId);
-        // não espera o link: ele chega na próxima sincronização
+        closeModal(); render();
+        // Fica checando a planilha até a foto aparecer (o Apps Script grava o link lá)
+        esperarFoto(postId);
+      } else {
+        closeModal(); render();
       }
-      closeModal(); render();
     };
   }
   draw();
+}
+
+// Após enviar uma foto, verifica a planilha algumas vezes até o link aparecer,
+// então atualiza o post na tela sozinho (sem o usuário recarregar).
+async function esperarFoto(postId, tentativas = 10) {
+  for (let i = 0; i < tentativas; i++) {
+    await new Promise((r) => setTimeout(r, 3000)); // espera 3s entre tentativas
+    let data;
+    try { data = await SYNC.jsonp(SYNC.url); } catch (e) { continue; }
+    const linha = (data.Memorias || []).find((m) => String(m.id) === String(postId));
+    if (linha && linha.foto) {
+      // achou o link: atualiza o post na memória e redesenha
+      const p = POSTS.find((x) => String(x.id) === String(postId));
+      if (p) { p.foto = linha.foto; p.aguardandoFoto = false; }
+      if (ALL && ALL.Memorias) {
+        const raw = ALL.Memorias.find((m) => String(m.id) === String(postId));
+        if (raw) raw.foto = linha.foto;
+      }
+      render();
+      return;
+    }
+  }
+  // Se após as tentativas não achou, a sincronização automática (1 min) resolve depois.
+  const p = POSTS.find((x) => String(x.id) === String(postId));
+  if (p) { p.aguardandoFoto = false; render(); }
 }
 
 // Modal: criar nova viagem
