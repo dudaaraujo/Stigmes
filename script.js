@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-q (logo animada)';
+const APP_VERSION = '2026-08-14-s (ícone sem texto no topo)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 // Logo animada (SVG inline) para splash, login e topo
@@ -1689,8 +1689,6 @@ function openTripModal() {
 // Init
 // ============================================================
 function init() {
-  // injeta a logo animada (SVG) em todos os contêineres
-  document.querySelectorAll('.logo-anim, .logo-anim-sm').forEach((el) => { el.innerHTML = LOGO_SVG; });
   // nav
   document.querySelectorAll('.nav button').forEach((b) => b.onclick = () => { current = b.dataset.nav; window.scrollTo(0,0); render(); });
   // fab
