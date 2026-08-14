@@ -338,6 +338,13 @@ body.dark .budget-alert.warn { color: #e8c65a; }
   margin-bottom:14px;
 }
 .code-entry-btn:hover { background:rgba(46,139,139,.16); }
+.roteiro-custo-btn {
+  display:flex; align-items:center; justify-content:center; gap:8px; width:100%;
+  font-size:14px; font-weight:600; color:var(--teal); background:rgba(46,139,139,.10);
+  border:1px solid rgba(46,139,139,.25); border-radius:12px; padding:12px; cursor:pointer;
+  margin-bottom:16px;
+}
+.roteiro-custo-btn:hover { background:rgba(46,139,139,.16); }
 
 /* ---- Form fields ---- */
 .field {
