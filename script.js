@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-d (aviso memórias vazias)';
+const APP_VERSION = '2026-08-14-e (mapa no roteiro)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -332,6 +332,7 @@ const ICON = {
   bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
   clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  navigation: '<polygon points="3 11 22 2 13 21 11 13 3 11"/>',
   moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
   sun: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
   mappin: '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
@@ -681,9 +682,11 @@ function renderItinerary() {
     const items = d.items.map((it) => {
       const cat = CATEGORIES[it.cat];
       const editavel = podeEditar(it.criadoPor);
+      const temLocal = (it.place || '').trim();
+      const btnMapa = temLocal ? `<button class="tl-map" data-map="${esc(it.place)}" title="Abrir no mapa">${svg('mappin',18,C.blue)}</button>` : '';
       return `<div class="tl-item">
         <div class="tl-dot" style="background:${cat.color}"></div>
-        <div class="tl-card${editavel?' tl-clickable':''}"${editavel?` data-edit-day="${d.day}" data-edit-id="${esc(String(it.id))}"`:''}><div class="tl-time serif">${it.time}</div><div style="flex:1"><div class="tl-name">${esc(it.name)}</div><div class="tl-place">${esc(it.place)}</div></div>${it.cost>0?`<div class="tl-cost">${TRIP.currency}${it.cost}</div>`:''}</div>
+        <div class="tl-card${editavel?' tl-clickable':''}"${editavel?` data-edit-day="${d.day}" data-edit-id="${esc(String(it.id))}"`:''}><div class="tl-time serif">${it.time}</div><div style="flex:1"><div class="tl-name">${esc(it.name)}</div><div class="tl-place">${esc(it.place)}</div></div>${it.cost>0?`<div class="tl-cost">${TRIP.currency}${it.cost}</div>`:''}${btnMapa}</div>
       </div>`;
     }).join('');
     return `<div class="day">
@@ -905,6 +908,11 @@ function bindScreenEvents() {
     const day = ITINERARY.find((x) => x.day === dayNum);
     const item = day && day.items.find((it) => String(it.id) === String(id));
     if (item) openActivityModal(item, dayNum);
+  });
+  // Botão de mapa: abre menu Waze / Google Maps (não dispara a edição)
+  document.querySelectorAll('[data-map]').forEach((b) => b.onclick = (ev) => {
+    ev.stopPropagation();
+    openMapaModal(b.dataset.map);
   });
   // Likes
   document.querySelectorAll('[data-like]').forEach((b) => b.onclick = () => { const id = +b.dataset.like; liked[id] = !liked[id]; render(); });
@@ -1190,6 +1198,25 @@ function openActivityModal(editItem, editDay) {
   draw();
 }
 
+// Menu: abrir um local no Waze ou no Google Maps
+function openMapaModal(local) {
+  const q = encodeURIComponent(local || '');
+  const wazeUrl = `https://waze.com/ul?q=${q}&navigate=yes`;
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${q}`;
+  overlay().innerHTML = `<div class="modal">
+    <div class="modal-grab"></div>
+    <div class="modal-head"><h3 class="serif">Abrir no mapa</h3><button id="m-close">${svg('x',20)}</button></div>
+    <div style="font-size:13px;color:var(--sub);margin-bottom:16px">Navegar até <b>${esc(local)}</b></div>
+    <a class="map-choice" href="${wazeUrl}" target="_blank" rel="noopener">${svg('navigation',20,'#33ccff')}<span>Abrir no Waze</span>${svg('chevronright',18,'var(--sub)')}</a>
+    <a class="map-choice" href="${mapsUrl}" target="_blank" rel="noopener">${svg('mappin',20,'#34a853')}<span>Abrir no Google Maps</span>${svg('chevronright',18,'var(--sub)')}</a>
+  </div>`;
+  overlay().classList.remove('hidden');
+  $('#m-close').onclick = closeModal;
+  // Fecha o menu ao escolher uma opção
+  document.querySelectorAll('.map-choice').forEach((a) => a.onclick = () => setTimeout(closeModal, 100));
+}
+
+// Menu: abrir um local no Waze ou no Google Maps — fim
 function openPostModal() {
   let form = { text: '', tags: '', grad: GRADS[0], fotoDataUrl: '', fotoNome: '' };
   function draw() {
