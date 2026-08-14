@@ -1,7 +1,7 @@
 /* ============================================================
    STIGMÉS — lógica do app (JS puro)
    ============================================================ */
-const APP_VERSION = '2026-08-14-c (foto aparece sozinha)';
+const APP_VERSION = '2026-08-14-d (aviso memórias vazias)';
 console.log('%cStigmés versão ' + APP_VERSION, 'color:#1E5AA8;font-weight:bold');
 
 
@@ -742,7 +742,14 @@ function renderMemories() {
       </div>
     </div>`;
   }).join('');
-  return `<div class="eyebrow">Feed social</div><h2 class="section-title serif">Memórias</h2>${posts}`;
+  const vazio = POSTS.length === 0
+    ? `<div class="empty memories-empty">
+        ${svg('camera',40,'var(--sub)')}
+        <div class="memories-empty-title">Nenhuma memória ainda</div>
+        <div>Compartilhe os momentos da viagem! Toque no <b>+</b> para publicar uma foto e escrever algo sobre ela.</div>
+      </div>`
+    : '';
+  return `<div class="eyebrow">Feed social</div><h2 class="section-title serif">Memórias</h2>${posts}${vazio}`;
 }
 
 // ============================================================
